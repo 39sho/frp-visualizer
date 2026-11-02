@@ -114,6 +114,18 @@ impl Parser {
                 .map_err(|_| "time_end must be a number".to_string())?;
             return Ok(());
         }
+        if let Some(rest) = line.strip_prefix("mode ") {
+            doc.mode = match rest.trim() {
+                "executable" => crate::model::DocumentMode::Executable,
+                "structural" => crate::model::DocumentMode::Structural,
+                other => {
+                    return Err(format!(
+                        "unknown mode '{other}' (use executable or structural)"
+                    ));
+                }
+            };
+            return Ok(());
+        }
         if line.starts_with("component ") && line.contains('=') {
             return self.parse_component_instance(doc, line);
         }
@@ -132,6 +144,8 @@ impl Parser {
         let (name, tail) = split_name(rest)?;
         ensure_unique_name(doc, name)?;
         let position = position.unwrap_or_else(|| default_position(doc));
+        let mut display_label = None;
+        let mut display_only = false;
 
         let kind = match keyword {
             "stream" => {
@@ -168,18 +182,36 @@ impl Parser {
                     .strip_prefix('=')
                     .ok_or("expected 'map <name> = <op>'")?
                     .trim();
-                NodeKind::Map {
-                    op: parse_unary_op(op)?,
-                }
+                let op = if let Some(display) = op.strip_prefix("display ") {
+                    let (text, rest) = take_quoted(display)?;
+                    if !rest.trim().is_empty() {
+                        return Err("unexpected text after display label".into());
+                    }
+                    display_label = Some(text);
+                    display_only = true;
+                    UnaryOp::Identity
+                } else {
+                    parse_unary_op(op)?
+                };
+                NodeKind::Map { op }
             }
             "filter" => {
                 let op = tail
                     .strip_prefix('=')
                     .ok_or("expected 'filter <name> = <op>'")?
                     .trim();
-                NodeKind::Filter {
-                    op: parse_filter_op(op)?,
-                }
+                let op = if let Some(display) = op.strip_prefix("display ") {
+                    let (text, rest) = take_quoted(display)?;
+                    if !rest.trim().is_empty() {
+                        return Err("unexpected text after display label".into());
+                    }
+                    display_label = Some(text);
+                    display_only = true;
+                    FilterOp::Always
+                } else {
+                    parse_filter_op(op)?
+                };
+                NodeKind::Filter { op }
             }
             "snapshot" => {
                 let op = tail
@@ -232,6 +264,10 @@ impl Parser {
         let id = doc.add_node(kind, position);
         if let Some(node) = doc.node_mut(id) {
             node.name = name.to_string();
+            if let Some(label) = display_label {
+                node.label = label;
+                node.display_only = display_only;
+            }
         }
         Ok(())
     }
@@ -275,6 +311,16 @@ impl Parser {
             Some((edge, label)) => (edge.trim(), label.trim()),
             None => (line, ""),
         };
+        let (label, label_width) = match label.rsplit_once(" @") {
+            Some((label, width)) => {
+                let width = width
+                    .trim()
+                    .parse::<f32>()
+                    .map_err(|_| "edge label width must be a number".to_string())?;
+                (label.trim(), Some(width))
+            }
+            None => (label, None),
+        };
         let (from, to) = edge_text
             .split_once("->")
             .ok_or("expected '<from> -> <to>'")?;
@@ -283,9 +329,10 @@ impl Parser {
         let edge_id = doc
             .add_edge_from_port(from, from_port, to, to_port)
             .map_err(|error| error.to_string())?;
-        if !label.is_empty() {
+        if !label.is_empty() || label_width.is_some() {
             if let Some(edge) = doc.edges.iter_mut().find(|edge| edge.id == edge_id) {
-                edge.label = label.to_string();
+                edge.label = label.replace("\\n", "\n");
+                edge.label_width = label_width;
             }
         }
         Ok(())
@@ -776,6 +823,45 @@ mod tests {
             parsed.doc.annotations[0].target,
             Some(AnnotationTarget::Transaction { index: 0 })
         ));
+    }
+
+    #[test]
+    fn parses_structural_display_nodes() {
+        let parsed = parse(include_str!("../examples/structural.frp")).unwrap();
+        assert_eq!(parsed.doc.mode, crate::model::DocumentMode::Structural);
+        let update = parsed
+            .doc
+            .nodes
+            .iter()
+            .find(|node| node.name == "update")
+            .unwrap();
+        assert!(update.display_only);
+        assert_eq!(update.label, "SetReferenceMapPoints");
+        assert!(crate::sim::validate_document(&parsed.doc).errors.is_empty());
+        let bundle = render_svgs(&parsed.doc);
+        assert!(bundle.network.contains("SetReference"));
+        assert!(!bundle.timing.contains(">42</text>"));
+    }
+
+    #[test]
+    fn display_only_nodes_are_rejected_in_executable_mode() {
+        let mut parsed = parse(include_str!("../examples/structural.frp")).unwrap();
+        parsed.doc.mode = crate::model::DocumentMode::Executable;
+        let report = crate::sim::validate_document(&parsed.doc);
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("Display-only")));
+    }
+
+    #[test]
+    fn parses_edge_label_width_and_newlines() {
+        let parsed =
+            parse("stream a\nmap m = identity\nsink s\na -> m : first\\nsecond @ 80\nm -> s\n")
+                .unwrap();
+        let edge = parsed.doc.edges.first().unwrap();
+        assert_eq!(edge.label, "first\nsecond");
+        assert_eq!(edge.label_width, Some(80.0));
     }
 
     #[test]

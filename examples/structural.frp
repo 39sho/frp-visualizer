@@ -1,0 +1,11 @@
+diagram Structural — display-only map
+mode structural
+layout auto
+time_end 2
+
+stream sInput events 1:42, 2:43
+map update = display "SetReferenceMapPoints"
+sink out
+
+sInput -> update
+update -> out

@@ -31,21 +31,36 @@ pub fn render_network(doc: &Document, layout: &NetworkLayout) -> Scene {
 
         if !edge.label.is_empty() {
             let size = 12.0;
-            let label = fit_text(&edge.label, 160.0, size);
-            let w = text_width(&label, size);
+            let max_width = edge.label_width.unwrap_or(220.0).max(60.0);
+            let lines = wrap_label_lines(&edge.label, max_width, size);
+            let line_height = size * 1.35;
+            let width = lines
+                .iter()
+                .map(|line| text_width(line, size))
+                .fold(0.0f32, f32::max);
+            let height = lines.len() as f32 * line_height;
             let p = route.label_pos;
             scene.rect(
                 Rect::new(
-                    p[0] - w / 2.0 - 4.0,
-                    p[1] - size * 0.72,
-                    w + 8.0,
-                    size * 1.45,
+                    p[0] - width / 2.0 - 5.0,
+                    p[1] - height / 2.0 - 3.0,
+                    width + 10.0,
+                    height + 6.0,
                 ),
                 3.0,
                 WHITE,
                 None,
             );
-            scene.text(p, label, size, MUTED, TextAnchor::Center);
+            let start_y = p[1] - height / 2.0 + line_height / 2.0;
+            for (index, line) in lines.iter().enumerate() {
+                scene.text(
+                    [p[0], start_y + index as f32 * line_height],
+                    line,
+                    size,
+                    MUTED,
+                    TextAnchor::Center,
+                );
+            }
         }
     }
 
@@ -209,6 +224,36 @@ fn draw_node(scene: &mut Scene, doc: &Document, id: NodeId, rect: Rect) {
             );
         }
     }
+}
+
+fn wrap_label_lines(text: &str, max_width: f32, size: f32) -> Vec<String> {
+    let mut lines = Vec::new();
+    for paragraph in text.split('\n') {
+        let mut current = String::new();
+        for word in paragraph.split_whitespace() {
+            let candidate = if current.is_empty() {
+                word.to_string()
+            } else {
+                format!("{current} {word}")
+            };
+            if !current.is_empty() && text_width(&candidate, size) > max_width {
+                lines.push(std::mem::take(&mut current));
+                current = word.to_string();
+            } else {
+                current = candidate;
+            }
+        }
+        if !current.is_empty() {
+            lines.push(current);
+        }
+    }
+    if lines.is_empty() {
+        lines.push(text.to_string());
+    }
+    lines
+        .into_iter()
+        .map(|line| fit_text(&line, max_width, size))
+        .collect()
 }
 
 fn draw_boundary_label(scene: &mut Scene, node: &crate::model::Node, rect: Rect, input: bool) {
