@@ -32,12 +32,7 @@ pub const BLUE: Color = Color::rgb(207, 230, 245);
 pub const CELL_INK: Color = Color::rgb(74, 121, 158);
 pub const ACCENT: Color = Color::rgb(45, 108, 223);
 pub const ACCENT_SOFT: Color = Color::rgb(224, 235, 255);
-pub const GREEN: Color = Color::rgb(141, 191, 77);
-pub const RED: Color = Color::rgb(196, 70, 70);
-pub const PANEL: Color = Color::rgb(247, 247, 245);
 pub const NOTE_FILL: Color = Color::rgb(154, 198, 88);
-pub const GRID: Color = Color::rgb(225, 225, 222);
-pub const TRANSPARENT: Color = Color(0, 0, 0, 0);
 
 #[derive(Clone, Copy, Debug)]
 pub struct Stroke {

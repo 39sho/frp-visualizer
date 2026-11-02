@@ -1,7 +1,7 @@
 use frp_visualizer::execution::{build_execution_model, ScopeId};
 use frp_visualizer::layout::{LayoutOptions, RouteStyle};
 use frp_visualizer::model::Document;
-use frp_visualizer::render_timing::TimingOptions;
+use frp_visualizer::render_timing::{TimingNetworkMode, TimingOptions};
 use frp_visualizer::{
     dsl, examples, find_component, layout, load_document, render_component_network,
     render_svgs_with_options, render_timing_scope_svg, save_document, RenderOptions,
@@ -22,8 +22,10 @@ struct RenderArgs {
     focus: Option<usize>,
     route_style: RouteStyle,
     expand: Option<String>,
+    expand_all: bool,
     timing_scope: TimingScopeArg,
     show_values: bool,
+    timing_network: TimingNetworkMode,
     network_only: bool,
 }
 
@@ -139,6 +141,7 @@ fn main() {
                 report.errors.len(),
                 report.warnings.len()
             );
+            println!("timing_reliable: {}", report.timing_reliable);
             if !report.errors.is_empty() || (strict && !report.warnings.is_empty()) {
                 std::process::exit(2);
             }
@@ -189,8 +192,10 @@ fn render_args(args: &[String], start: usize) -> RenderArgs {
     let mut focus = None;
     let mut route_style = RouteStyle::default();
     let mut expand = None;
+    let mut expand_all = false;
     let mut timing_scope = TimingScopeArg::Outer;
     let mut show_values = true;
+    let mut timing_network = TimingNetworkMode::Focus;
     let mut network_only = false;
     let mut iter = args.iter().skip(start);
     while let Some(arg) = iter.next() {
@@ -220,6 +225,8 @@ fn render_args(args: &[String], start: usize) -> RenderArgs {
             expand = Some(value.clone());
         } else if let Some(value) = arg.strip_prefix("--expand=") {
             expand = Some(value.to_string());
+        } else if arg == "--expand-all" {
+            expand_all = true;
         } else if arg == "--timing-scope" {
             let Some(value) = iter.next() else {
                 eprintln!("--timing-scope requires outer, all, or component:<name>");
@@ -238,6 +245,14 @@ fn render_args(args: &[String], start: usize) -> RenderArgs {
             show_values = parse_timing_values(value);
         } else if arg == "--no-timing-values" {
             show_values = false;
+        } else if arg == "--timing-network" {
+            let Some(value) = iter.next() else {
+                eprintln!("--timing-network requires focus or none");
+                std::process::exit(2);
+            };
+            timing_network = parse_timing_network(value);
+        } else if let Some(value) = arg.strip_prefix("--timing-network=") {
+            timing_network = parse_timing_network(value);
         } else if arg == "--output" {
             let Some(value) = iter.next() else {
                 eprintln!("--output requires all or network");
@@ -258,9 +273,22 @@ fn render_args(args: &[String], start: usize) -> RenderArgs {
         focus,
         route_style,
         expand,
+        expand_all,
         timing_scope,
         show_values,
+        timing_network,
         network_only,
+    }
+}
+
+fn parse_timing_network(value: &str) -> TimingNetworkMode {
+    match value {
+        "focus" => TimingNetworkMode::Focus,
+        "none" => TimingNetworkMode::None,
+        other => {
+            eprintln!("unknown timing network mode: {other} (use focus or none)");
+            std::process::exit(2);
+        }
     }
 }
 
@@ -297,6 +325,13 @@ fn parse_timing_values(value: &str) -> bool {
             eprintln!("unknown timing values mode: {other} (use values or none)");
             std::process::exit(2);
         }
+    }
+}
+
+fn collect_component_names(doc: &Document, names: &mut Vec<String>) {
+    for definition in &doc.components {
+        names.push(definition.name.clone());
+        collect_component_names(&definition.doc, names);
     }
 }
 
@@ -340,16 +375,25 @@ fn render_to_dir(mut doc: Document, args: RenderArgs) {
         timing: TimingOptions {
             focus: args.focus,
             show_values: args.show_values,
+            timing_network: args.timing_network,
             ..Default::default()
         },
         layout: LayoutOptions {
             route_style: args.route_style,
         },
     };
-    let model = build_execution_model(&doc);
-    for warning in &model.sim.warnings {
+    let report = frp_visualizer::sim::validate_document(&doc);
+    for error in &report.errors {
+        eprintln!("error: {error}");
+    }
+    for warning in &report.warnings {
         eprintln!("warning: {warning}");
     }
+    if !report.errors.is_empty() {
+        eprintln!("refusing to render an invalid document; fix errors or use `check` for details");
+        std::process::exit(2);
+    }
+    let model = build_execution_model(&doc);
     let dir = PathBuf::from(&args.out_dir);
     if let Err(err) = std::fs::create_dir_all(&dir) {
         eprintln!("failed to create {}: {err}", dir.display());
@@ -378,6 +422,13 @@ fn render_to_dir(mut doc: Document, args: RenderArgs) {
         eprintln!("failed to write {}: {err}", json_path.display());
     } else {
         println!("wrote {}", json_path.display());
+    }
+    let trace_path = dir.join("trace.json");
+    let trace = frp_visualizer::execution::trace_json(&doc, &model, report.timing_reliable);
+    if let Err(err) = std::fs::write(&trace_path, trace) {
+        eprintln!("failed to write {}: {err}", trace_path.display());
+    } else {
+        println!("wrote {}", trace_path.display());
     }
     println!(
         "network: {} chars, timing: {} chars, combined: {} chars",
@@ -424,10 +475,19 @@ fn render_to_dir(mut doc: Document, args: RenderArgs) {
             println!("wrote {}", file.display());
         }
     }
+    let mut expanded_names = Vec::new();
     if let Some(name) = &args.expand {
-        match render_component_network(&doc, name, &options) {
+        expanded_names.push(name.clone());
+    }
+    if args.expand_all {
+        collect_component_names(&doc, &mut expanded_names);
+    }
+    expanded_names.sort();
+    expanded_names.dedup();
+    for name in expanded_names {
+        match render_component_network(&doc, &name, &options) {
             Some(svg) => {
-                let file = dir.join(format!("expanded_{}.svg", safe_name(name)));
+                let file = dir.join(format!("expanded_{}.svg", safe_name(&name)));
                 if let Err(err) = std::fs::write(&file, svg) {
                     eprintln!("failed to write {}: {err}", file.display());
                 } else {
@@ -436,8 +496,8 @@ fn render_to_dir(mut doc: Document, args: RenderArgs) {
             }
             None => eprintln!("component not found: {name}"),
         }
-        if let Some(definition) = find_component(&doc, name) {
-            let json_path = dir.join(format!("expanded_{}.json", safe_name(name)));
+        if let Some(definition) = find_component(&doc, &name) {
+            let json_path = dir.join(format!("expanded_{}.json", safe_name(&name)));
             match save_document(&definition.doc, &json_path) {
                 Ok(()) => println!("wrote {}", json_path.display()),
                 Err(err) => eprintln!("failed to write {}: {err}", json_path.display()),
@@ -455,8 +515,8 @@ fn usage() {
            frp-visualizer example <name> [out]  write an example as JSON\n\
            frp-visualizer compile <diagram.frp> [out.json] [--auto-layout]\n\
            frp-visualizer check <diagram.frp|diagram.json> [--strict]\n\
-           frp-visualizer render <json|frp> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component] [--timing-scope outer|all|component:<name>] [--timing-values values|none] [--output all|network]\n\
-           frp-visualizer render-example <name> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component] [--timing-scope outer|all|component:<name>] [--timing-values values|none] [--output all|network]\n\
+           frp-visualizer render <json|frp> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component | --expand-all] [--timing-scope outer|all|component:<name>] [--timing-values values|none] [--timing-network focus|none] [--output all|network]\n\
+           frp-visualizer render-example <name> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component | --expand-all] [--timing-scope outer|all|component:<name>] [--timing-values values|none] [--timing-network focus|none] [--output all|network]\n\
          \n\
          default route: orthogonal (use --route hybrid for diagonal wires)\n"
     );

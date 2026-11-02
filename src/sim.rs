@@ -1,5 +1,6 @@
 use crate::model::{
-    ComponentDef, Document, DocumentMode, Edge, NodeId, NodeKind, PortSpec, PortType, Value,
+    ComponentDef, Document, DocumentMode, Edge, FilterOp, NodeId, NodeKind, PortSpec, PortType,
+    Value,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -25,16 +26,10 @@ pub struct TransactionTrace {
     pub updates: HashMap<NodeId, Value>,
 }
 
-#[derive(Clone, Debug)]
-pub enum Origin {
-    Internal { component: NodeId },
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct FlattenedDocument {
     pub doc: Document,
     pub warnings: Vec<String>,
-    pub origins: HashMap<NodeId, Origin>,
     pub component_inputs: HashMap<(NodeId, usize), (NodeId, usize)>,
     pub component_outputs: HashMap<(NodeId, usize), (NodeId, usize)>,
     pub scopes: HashMap<NodeId, Vec<NodeId>>,
@@ -84,7 +79,6 @@ pub fn flatten_document(doc: &Document) -> FlattenedDocument {
         expansions: 0,
         original_nodes,
         owner_of: HashMap::new(),
-        origins: HashMap::new(),
         component_inputs_pending: HashMap::new(),
         component_outputs: HashMap::new(),
         scopes: HashMap::new(),
@@ -95,7 +89,6 @@ pub fn flatten_document(doc: &Document) -> FlattenedDocument {
     FlattenedDocument {
         doc: flat,
         warnings: context.warnings,
-        origins: context.origins,
         component_inputs: context.component_inputs_pending,
         component_outputs: context.component_outputs,
         scopes: context.scopes,
@@ -130,7 +123,6 @@ struct FlattenContext {
     expansions: usize,
     original_nodes: HashSet<NodeId>,
     owner_of: HashMap<NodeId, NodeId>,
-    origins: HashMap<NodeId, Origin>,
     component_inputs_pending: HashMap<(NodeId, usize), (NodeId, usize)>,
     component_outputs: HashMap<(NodeId, usize), (NodeId, usize)>,
     scopes: HashMap<NodeId, Vec<NodeId>>,
@@ -262,8 +254,6 @@ impl FlattenContext {
             cloned.name = format!("{prefix}/{}", cloned.name);
             self.owner_of.insert(cloned.id, owner);
             self.scopes.entry(owner).or_default().push(cloned.id);
-            self.origins
-                .insert(cloned.id, Origin::Internal { component: owner });
             doc.nodes.push(cloned);
         }
         let mut internal_edges = Vec::new();
@@ -410,6 +400,7 @@ impl FlattenContext {
 pub struct ValidationReport {
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
+    pub timing_reliable: bool,
 }
 
 pub fn validate_document(doc: &Document) -> ValidationReport {
@@ -443,7 +434,50 @@ pub fn validate_document(doc: &Document) -> ValidationReport {
         }
     }
 
-    ValidationReport { errors, warnings }
+    let (timing_reliable, timing_warnings) = filter_timing_reliability(&flattened.doc);
+    warnings.extend(timing_warnings);
+
+    ValidationReport {
+        errors,
+        warnings,
+        timing_reliable,
+    }
+}
+
+fn filter_timing_reliability(doc: &Document) -> (bool, Vec<String>) {
+    let mut stack: Vec<NodeId> = doc
+        .nodes
+        .iter()
+        .filter(|node| node.display_only)
+        .map(|node| node.id)
+        .collect();
+    if stack.is_empty() {
+        return (true, Vec::new());
+    }
+    let mut seen = HashSet::new();
+    let mut warnings = Vec::new();
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        for edge in doc.edges.iter().filter(|edge| edge.from == id) {
+            let Some(target) = doc.node(edge.to) else {
+                continue;
+            };
+            if let NodeKind::Filter { op } = &target.kind {
+                if !matches!(op, FilterOp::Always) {
+                    warnings.push(format!(
+                        "Timing event flow may depend on display-only values through filter '{}'",
+                        target.name
+                    ));
+                }
+            }
+            stack.push(target.id);
+        }
+    }
+    warnings.sort();
+    warnings.dedup();
+    (warnings.is_empty(), warnings)
 }
 
 pub fn simulate(doc: &Document) -> Simulation {
@@ -949,16 +983,11 @@ fn cell_inputs_with_updates(
     (get(0), get(1))
 }
 
-pub fn edge_source_type(doc: &Document, edge: &Edge) -> Option<crate::model::PortType> {
-    doc.node(edge.from)
-        .and_then(|n| n.kind.output_types().get(edge.from_port).copied())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{
-        CombineOp, ComponentDef, NodeKind, PortSpec, PortType, TimedValue, UnaryOp, Value,
+        CombineOp, ComponentDef, FilterOp, NodeKind, PortSpec, PortType, TimedValue, UnaryOp, Value,
     };
 
     fn accum_doc() -> Document {
@@ -1385,6 +1414,44 @@ mod tests {
             let report = validate_document(&doc);
             assert!(report.errors.is_empty(), "{key}: {:?}", report.errors);
         }
+    }
+
+    #[test]
+    fn display_only_values_make_filter_timing_unreliable() {
+        let mut doc = Document::blank();
+        doc.mode = DocumentMode::Structural;
+        let source = doc.add_node(
+            NodeKind::InputEvent {
+                events: vec![TimedValue::new(1.0, Value::Number(1.0))],
+            },
+            [0.0, 0.0],
+        );
+        let display = doc.add_node(
+            NodeKind::Map {
+                op: UnaryOp::Identity,
+            },
+            [200.0, 0.0],
+        );
+        if let Some(node) = doc.node_mut(display) {
+            node.display_only = true;
+            node.label = "opaque".into();
+        }
+        let filter = doc.add_node(
+            NodeKind::Filter {
+                op: FilterOp::Positive,
+            },
+            [400.0, 0.0],
+        );
+        let sink = doc.add_node(NodeKind::Sink, [600.0, 0.0]);
+        doc.add_edge(source, display, 0).unwrap();
+        doc.add_edge(display, filter, 0).unwrap();
+        doc.add_edge(filter, sink, 0).unwrap();
+        let report = validate_document(&doc);
+        assert!(!report.timing_reliable);
+        assert!(report
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("display-only values")));
     }
 
     #[test]

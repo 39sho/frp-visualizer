@@ -65,9 +65,8 @@ pub fn render_svgs_with_options(doc: &Document, options: &RenderOptions) -> SvgB
         &model.sim,
         &outer_lanes,
         &timing_options,
-        &options.layout,
         true,
-        doc.mode != DocumentMode::Structural,
+        &model.flat.doc,
     );
     let timing = timing_view
         .scene
@@ -164,9 +163,8 @@ pub fn render_timing_scope_svg(
         &model.sim,
         &lanes,
         &timing_options,
-        &options.layout,
         false,
-        false,
+        &model.flat.doc,
     );
     Some((
         view.scene.to_svg(view.width, view.height, 0.0),

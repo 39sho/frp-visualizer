@@ -20,17 +20,7 @@ impl ScopeId {
 }
 
 #[derive(Clone, Debug)]
-pub enum SignalId {
-    Node(NodeId),
-    ComponentInput { component: NodeId, port: usize },
-    ComponentOutput { component: NodeId, port: usize },
-    Sink(NodeId),
-    Internal(NodeId),
-}
-
-#[derive(Clone, Debug)]
 pub struct LaneSpec {
-    pub signal: SignalId,
     pub label: String,
     pub kind: PortType,
     pub source: NodeId,
@@ -90,7 +80,6 @@ pub fn build_execution_model(doc: &Document) -> ExecutionModel {
                 PortType::Stream
             };
             lanes.push(LaneSpec {
-                signal: SignalId::Node(node.id),
                 label: node.name.clone(),
                 kind,
                 source: node.id,
@@ -105,7 +94,6 @@ pub fn build_execution_model(doc: &Document) -> ExecutionModel {
             if let Some(&(source, port)) = flat.sinks.get(&node.id) {
                 if let Some(kind) = output_kind(&flat.doc, source, port) {
                     lanes.push(LaneSpec {
-                        signal: SignalId::Sink(node.id),
                         label: node.name.clone(),
                         kind,
                         source,
@@ -127,10 +115,6 @@ pub fn build_execution_model(doc: &Document) -> ExecutionModel {
                     continue;
                 }
                 lanes.push(LaneSpec {
-                    signal: SignalId::ComponentOutput {
-                        component: node.id,
-                        port: index,
-                    },
                     label: format!("{}.{}", node.name, port.name),
                     kind: port.ty,
                     source,
@@ -156,10 +140,6 @@ pub fn build_execution_model(doc: &Document) -> ExecutionModel {
         for (index, port) in inputs.iter().enumerate() {
             if let Some(&(source, _)) = flat.component_inputs.get(&(node.id, index)) {
                 lanes.push(LaneSpec {
-                    signal: SignalId::ComponentInput {
-                        component: node.id,
-                        port: index,
-                    },
                     label: format!("in {}", port.name),
                     kind: port.ty,
                     source,
@@ -182,7 +162,6 @@ pub fn build_execution_model(doc: &Document) -> ExecutionModel {
                     PortType::Stream
                 };
                 lanes.push(LaneSpec {
-                    signal: SignalId::Internal(*id),
                     label: short_label(&internal.name),
                     kind,
                     source: *id,
@@ -194,10 +173,6 @@ pub fn build_execution_model(doc: &Document) -> ExecutionModel {
         for (index, port) in outputs.iter().enumerate() {
             if let Some(&(source, _)) = flat.component_outputs.get(&(node.id, index)) {
                 lanes.push(LaneSpec {
-                    signal: SignalId::ComponentOutput {
-                        component: node.id,
-                        port: index,
-                    },
                     label: format!("out {}", port.name),
                     kind: port.ty,
                     source,
@@ -253,6 +228,105 @@ fn short_label(name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
+pub fn trace_json(doc: &Document, model: &ExecutionModel, timing_reliable: bool) -> String {
+    let flat = &model.flat.doc;
+    let name = |id: NodeId| {
+        flat.node(id)
+            .map(|node| node.name.clone())
+            .unwrap_or_else(|| format!("#{id}"))
+    };
+
+    let transactions: Vec<serde_json::Value> = model
+        .sim
+        .traces
+        .iter()
+        .map(|trace| {
+            let events: serde_json::Map<String, serde_json::Value> = trace
+                .events
+                .iter()
+                .map(|(id, value)| (name(*id), serde_json::json!(value.to_string())))
+                .collect();
+            let updates: serde_json::Map<String, serde_json::Value> = trace
+                .updates
+                .iter()
+                .map(|(id, value)| (name(*id), serde_json::json!(value.to_string())))
+                .collect();
+            let cell_before: serde_json::Map<String, serde_json::Value> = trace
+                .cell_before
+                .iter()
+                .map(|(id, value)| (name(*id), serde_json::json!(value.to_string())))
+                .collect();
+            let cell_after: serde_json::Map<String, serde_json::Value> = trace
+                .cell_after
+                .iter()
+                .map(|(id, value)| (name(*id), serde_json::json!(value.to_string())))
+                .collect();
+            serde_json::json!({
+                "index": trace.index,
+                "time": trace.time,
+                "events": events,
+                "updates": updates,
+                "cell_before": cell_before,
+                "cell_after": cell_after,
+            })
+        })
+        .collect();
+
+    let lanes: Vec<serde_json::Value> = model
+        .lanes
+        .iter()
+        .map(|lane| {
+            let kind = match lane.kind {
+                PortType::Cell => "cell",
+                PortType::Stream => "stream",
+                PortType::Any => "any",
+            };
+            let mut value = serde_json::json!({
+                "scope": lane.scope.label(doc),
+                "label": lane.label,
+                "kind": kind,
+                "source": name(lane.source),
+            });
+            if lane.kind == PortType::Cell {
+                let steps: Vec<serde_json::Value> = model
+                    .sim
+                    .cell(lane.source)
+                    .iter()
+                    .map(|step| {
+                        serde_json::json!({
+                            "time": step.time,
+                            "value": step.value.to_string(),
+                        })
+                    })
+                    .collect();
+                value["steps"] = serde_json::Value::Array(steps);
+            } else {
+                let events: Vec<serde_json::Value> = model
+                    .sim
+                    .stream(lane.source)
+                    .iter()
+                    .map(|event| {
+                        serde_json::json!({
+                            "time": event.time,
+                            "value": event.value.to_string(),
+                        })
+                    })
+                    .collect();
+                value["events"] = serde_json::Value::Array(events);
+            }
+            value
+        })
+        .collect();
+
+    serde_json::to_string_pretty(&serde_json::json!({
+        "title": doc.title,
+        "timing_reliable": timing_reliable,
+        "values_reliable": doc.mode == crate::model::DocumentMode::Executable,
+        "transactions": transactions,
+        "lanes": lanes,
+    }))
+    .unwrap_or_else(|_| "{}".to_string())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,6 +370,18 @@ mod tests {
         for lane in &lanes {
             assert!(model.flat.doc.node(lane.source).is_some());
         }
+    }
+
+    #[test]
+    fn trace_json_contains_transactions_and_lanes() {
+        let doc = crate::examples::load_example("component").unwrap();
+        let model = build_execution_model(&doc);
+        let trace = trace_json(&doc, &model, true);
+        let value: serde_json::Value = serde_json::from_str(&trace).unwrap();
+        assert_eq!(value["timing_reliable"], true);
+        assert_eq!(value["values_reliable"], true);
+        assert!(value["transactions"].as_array().unwrap().len() >= 3);
+        assert!(!value["lanes"].as_array().unwrap().is_empty());
     }
 
     #[test]

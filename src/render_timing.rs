@@ -6,7 +6,7 @@ use crate::scene::{
     arrow_head, Color, Scene, Stroke, TextAnchor, ACCENT, BLUE, CELL_INK, FAINT, INK, MUTED, WHITE,
     YELLOW,
 };
-use crate::sim::{SimStep, Simulation};
+use crate::sim::{SimStep, Simulation, TransactionTrace};
 use std::collections::HashSet;
 
 const LABEL_W: f32 = 220.0;
@@ -19,7 +19,13 @@ pub struct TimingView {
     pub scene: Scene,
     pub width: f32,
     pub height: f32,
-    pub lanes: Vec<(String, Rect)>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TimingNetworkMode {
+    #[default]
+    Focus,
+    None,
 }
 
 #[derive(Clone, Debug)]
@@ -28,6 +34,7 @@ pub struct TimingOptions {
     pub show_transactions: bool,
     pub show_values: bool,
     pub focus: Option<usize>,
+    pub timing_network: TimingNetworkMode,
 }
 
 impl Default for TimingOptions {
@@ -37,18 +44,9 @@ impl Default for TimingOptions {
             show_transactions: true,
             show_values: true,
             focus: None,
+            timing_network: TimingNetworkMode::Focus,
         }
     }
-}
-
-pub fn timing_height(doc: &Document) -> f32 {
-    let lanes = doc
-        .nodes
-        .iter()
-        .filter(|n| n.kind.is_event() || n.kind.is_cell())
-        .count()
-        .max(1);
-    HEADER_H + lanes as f32 * ROW_H + FOOTER_H
 }
 
 pub fn render_timing(
@@ -56,9 +54,8 @@ pub fn render_timing(
     sim: &Simulation,
     lanes: &[LaneSpec],
     options: &TimingOptions,
-    layout_options: &crate::layout::LayoutOptions,
     show_annotations: bool,
-    show_execution: bool,
+    focus_doc: &Document,
 ) -> TimingView {
     let mut scene = Scene::new();
     let width = options.width.max(760.0);
@@ -75,28 +72,22 @@ pub fn render_timing(
     let main_height = lanes_bottom + FOOTER_H;
     let axis_y = main_height - 32.0;
 
-    let exec_panel = show_execution
-        .then_some(options.focus)
-        .flatten()
-        .and_then(|index| {
+    let exec_panel = if options.timing_network == TimingNetworkMode::Focus {
+        options.focus.and_then(|index| {
             let trace = sim.traces.get(index)?;
-            let network_layout = crate::layout::layout_with(doc, layout_options);
-            let network_scene = crate::render_network::render_network(doc, &network_layout);
-            let bounds = network_scene.bounds()?;
-            let scale = ((width - 64.0) / bounds.w.max(1.0)).clamp(0.2, 1.0);
-            let panel_height = 30.0 + bounds.h * scale + 18.0;
-            Some((
-                trace,
-                network_scene,
-                network_layout,
-                bounds,
-                scale,
-                panel_height,
-            ))
-        });
+            let focus = build_focus_network(focus_doc, trace)?;
+            let scale = ((width - 80.0) / focus.bounds.w.max(1.0))
+                .min(88.0 / focus.bounds.h.max(1.0))
+                .clamp(0.2, 1.0);
+            let panel_height = 34.0 + focus.bounds.h * scale + 28.0;
+            Some((trace, focus, scale, panel_height))
+        })
+    } else {
+        None
+    };
     let exec_height = exec_panel
         .as_ref()
-        .map(|panel| panel.5 + 12.0)
+        .map(|panel| panel.3 + 12.0)
         .unwrap_or(0.0);
     let height = main_height + exec_height;
 
@@ -263,7 +254,7 @@ pub fn render_timing(
         TextAnchor::End,
     );
 
-    if let Some((trace, network_scene, network_layout, bounds, scale, panel_height)) = &exec_panel {
+    if let Some((trace, focus, scale, panel_height)) = &exec_panel {
         let panel_top = main_height + 6.0;
         scene.rect(
             Rect::new(20.0, panel_top, width - 40.0, *panel_height),
@@ -278,44 +269,22 @@ pub fn render_timing(
             MUTED,
             TextAnchor::Start,
         );
-        let dx = 32.0 - bounds.x * scale;
-        let dy = panel_top + 28.0 - bounds.y * scale;
-        scene.append_scaled(network_scene, dx, dy, *scale);
+        let dx = (width - focus.bounds.w * scale) / 2.0 - focus.bounds.x * scale;
+        let dy = panel_top + 34.0 - focus.bounds.y * scale;
+        scene.append_scaled(&focus.scene, dx, dy, *scale);
 
-        let mut active: HashSet<NodeId> = trace
-            .events
-            .keys()
-            .chain(trace.updates.keys())
-            .copied()
-            .collect();
-        let sinks: Vec<NodeId> = doc
-            .edges
-            .iter()
-            .filter(|edge| active.contains(&edge.from))
-            .filter(|edge| {
-                doc.node(edge.to)
-                    .map(|node| node.kind.is_sink())
-                    .unwrap_or(false)
-            })
-            .map(|edge| edge.to)
-            .collect();
-        active.extend(sinks);
-
-        for (&id, rect) in &network_layout.node_rects {
-            if !active.contains(&id) {
+        for (&id, rect) in &focus.layout.node_rects {
+            if !focus.active.contains(&id) {
                 continue;
             }
-            let Some(node) = doc.node(id) else {
-                continue;
-            };
             let scaled = Rect::new(
                 rect.x * scale + dx,
                 rect.y * scale + dy,
                 rect.w * scale,
                 rect.h * scale,
             );
-            let is_snapshot = matches!(node.kind, NodeKind::Snapshot { .. });
-            let is_hold = matches!(node.kind, NodeKind::Hold { .. });
+            let is_snapshot = focus.snapshots.contains(&id);
+            let is_hold = focus.holds.contains(&id);
             let stroke = if is_snapshot {
                 Stroke::dashed(ACCENT, 1.2, 3.0, 3.0)
             } else {
@@ -324,11 +293,11 @@ pub fn render_timing(
             scene.rect(scaled.expand(3.0), 6.0, Color(0, 0, 0, 0), Some(stroke));
             if is_snapshot {
                 scene.text(
-                    [scaled.center()[0], scaled.y - 13.0 * scale - 15.0],
+                    [scaled.right() + 6.0, scaled.center()[1]],
                     "snap!",
                     8.5,
                     ACCENT,
-                    TextAnchor::Center,
+                    TextAnchor::Start,
                 );
             }
             if is_hold {
@@ -372,17 +341,89 @@ pub fn render_timing(
         scene,
         width,
         height,
-        lanes: lanes
-            .iter()
-            .enumerate()
-            .map(|(i, lane)| {
-                (
-                    lane.label.clone(),
-                    Rect::new(0.0, first_row_y + i as f32 * row_h, width, row_h),
-                )
-            })
-            .collect(),
     }
+}
+
+struct FocusNetwork {
+    scene: Scene,
+    layout: crate::layout::NetworkLayout,
+    bounds: Rect,
+    active: HashSet<NodeId>,
+    snapshots: HashSet<NodeId>,
+    holds: HashSet<NodeId>,
+}
+
+fn build_focus_network(doc: &Document, trace: &TransactionTrace) -> Option<FocusNetwork> {
+    let active: HashSet<NodeId> = trace
+        .events
+        .keys()
+        .chain(trace.updates.keys())
+        .copied()
+        .collect();
+    if active.is_empty() {
+        return None;
+    }
+    let mut ids = active.clone();
+    for id in &active {
+        for edge in &doc.edges {
+            if edge.from == *id {
+                ids.insert(edge.to);
+            }
+            if edge.to == *id {
+                ids.insert(edge.from);
+            }
+        }
+    }
+    if ids.len() > 18 {
+        ids = active.clone();
+    }
+    let mut focus = doc.clone();
+    focus.nodes.retain(|node| ids.contains(&node.id));
+    focus
+        .edges
+        .retain(|edge| ids.contains(&edge.from) && ids.contains(&edge.to));
+    focus.components.clear();
+    focus.annotations.clear();
+    for node in &mut focus.nodes {
+        if let Some((_, short)) = node.name.rsplit_once('/') {
+            node.name = short.to_string();
+        }
+    }
+    if focus.nodes.is_empty() {
+        return None;
+    }
+    crate::layout::auto_layout(&mut focus);
+    let layout = crate::layout::layout(&focus);
+    let scene = crate::render_network::render_network(&focus, &layout);
+    let bounds = scene.bounds()?;
+    let snapshots = ids
+        .iter()
+        .copied()
+        .filter(|id| trace.events.contains_key(id))
+        .filter(|id| {
+            doc.node(*id)
+                .map(|node| matches!(node.kind, NodeKind::Snapshot { .. }))
+                .unwrap_or(false)
+        })
+        .collect();
+    let holds = ids
+        .iter()
+        .copied()
+        .filter(|id| trace.updates.contains_key(id))
+        .filter(|id| {
+            doc.node(*id)
+                .map(|node| matches!(node.kind, NodeKind::Hold { .. }))
+                .unwrap_or(false)
+        })
+        .collect();
+    Some(FocusNetwork {
+        scene,
+        layout,
+        bounds,
+        active,
+        snapshots,
+        holds,
+    })
 }
 
 fn draw_stream(
@@ -552,25 +593,5 @@ fn timing_label(value: &crate::model::Value, max: usize) -> String {
     match value {
         crate::model::Value::Unit => "unit".into(),
         other => other.short(max),
-    }
-}
-
-pub fn timing_has_cells(doc: &Document) -> bool {
-    doc.nodes.iter().any(|n| n.kind.is_cell())
-}
-
-pub fn timing_node_ids(doc: &Document) -> Vec<NodeId> {
-    doc.nodes
-        .iter()
-        .filter(|n| n.kind.is_event() || n.kind.is_cell())
-        .map(|n| n.id)
-        .collect()
-}
-
-pub fn timeline_kind_color(kind: &NodeKind) -> crate::scene::Color {
-    if kind.is_cell() {
-        BLUE
-    } else {
-        YELLOW
     }
 }

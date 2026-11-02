@@ -1,4 +1,4 @@
-use crate::model::{Document, Edge, NodeId, NodeKind, Rect};
+use crate::model::{Document, NodeId, NodeKind, Rect};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
@@ -36,25 +36,6 @@ impl NetworkLayout {
             return None;
         }
         Some(input_port_pos(node, rect, port))
-    }
-
-    pub fn output_port(&self, doc: &Document, node: NodeId) -> Option<[f32; 2]> {
-        let rect = *self.node_rects.get(&node)?;
-        doc.node(node)?.kind.output_types().first().copied()?;
-        Some([rect.right(), rect.y + rect.h / 2.0])
-    }
-
-    pub fn node_at(&self, doc: &Document, p: [f32; 2]) -> Option<NodeId> {
-        doc.nodes
-            .iter()
-            .rev()
-            .find(|n| {
-                self.node_rects
-                    .get(&n.id)
-                    .map(|r| r.expand(2.0).contains(p))
-                    .unwrap_or(false)
-            })
-            .map(|n| n.id)
     }
 }
 
@@ -1306,10 +1287,6 @@ pub fn edge_direction(route: &EdgeRoute) -> [f32; 2] {
     let end = route.points[route.points.len() - 1];
     let prev = route.points[route.points.len() - 2];
     [end[0] - prev[0], end[1] - prev[1]]
-}
-
-pub fn edge_from<'a>(doc: &'a Document, edge: &Edge) -> Option<&'a crate::model::Node> {
-    doc.node(edge.from)
 }
 
 #[cfg(test)]
