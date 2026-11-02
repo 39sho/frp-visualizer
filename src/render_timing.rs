@@ -1,4 +1,7 @@
-use crate::model::{fit_text, text_width, AnnotationTarget, Document, NodeId, NodeKind, Rect};
+use crate::execution::LaneSpec;
+use crate::model::{
+    fit_text, text_width, AnnotationTarget, Document, NodeId, NodeKind, PortType, Rect,
+};
 use crate::scene::{
     arrow_head, Color, Scene, Stroke, TextAnchor, ACCENT, BLUE, CELL_INK, FAINT, INK, MUTED, WHITE,
     YELLOW,
@@ -6,7 +9,7 @@ use crate::scene::{
 use crate::sim::{SimStep, Simulation};
 use std::collections::HashSet;
 
-const LABEL_W: f32 = 164.0;
+const LABEL_W: f32 = 220.0;
 const HEADER_H: f32 = 58.0;
 const ROW_H: f32 = 66.0;
 const FOOTER_H: f32 = 52.0;
@@ -16,13 +19,14 @@ pub struct TimingView {
     pub scene: Scene,
     pub width: f32,
     pub height: f32,
-    pub lanes: Vec<(NodeId, Rect)>,
+    pub lanes: Vec<(String, Rect)>,
 }
 
 #[derive(Clone, Debug)]
 pub struct TimingOptions {
     pub width: f32,
     pub show_transactions: bool,
+    pub show_values: bool,
     pub focus: Option<usize>,
 }
 
@@ -31,6 +35,7 @@ impl Default for TimingOptions {
         Self {
             width: 1160.0,
             show_transactions: true,
+            show_values: true,
             focus: None,
         }
     }
@@ -49,8 +54,11 @@ pub fn timing_height(doc: &Document) -> f32 {
 pub fn render_timing(
     doc: &Document,
     sim: &Simulation,
+    lanes: &[LaneSpec],
     options: &TimingOptions,
     layout_options: &crate::layout::LayoutOptions,
+    show_annotations: bool,
+    show_execution: bool,
 ) -> TimingView {
     let mut scene = Scene::new();
     let width = options.width.max(760.0);
@@ -62,43 +70,30 @@ pub fn render_timing(
     let end = doc.effective_end_time().max(1.0);
     let map_x = |t: f64| -> f32 { x0 + (t / end).clamp(0.0, 1.2) as f32 * (x1 - x0) };
 
-    let mut lanes: Vec<&crate::model::Node> = doc
-        .nodes
-        .iter()
-        .filter(|n| n.kind.is_event() || n.kind.is_cell())
-        .collect();
-    lanes.sort_by(|a, b| {
-        a.pos[0]
-            .partial_cmp(&b.pos[0])
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| {
-                a.pos[1]
-                    .partial_cmp(&b.pos[1])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .then_with(|| a.id.cmp(&b.id))
-    });
     let lane_count = lanes.len().max(1);
     let lanes_bottom = HEADER_H + lane_count as f32 * row_h;
     let main_height = lanes_bottom + FOOTER_H;
     let axis_y = main_height - 32.0;
 
-    let exec_panel = options.focus.and_then(|index| {
-        let trace = sim.traces.get(index)?;
-        let network_layout = crate::layout::layout_with(doc, layout_options);
-        let network_scene = crate::render_network::render_network(doc, &network_layout);
-        let bounds = network_scene.bounds()?;
-        let scale = ((width - 64.0) / bounds.w.max(1.0)).clamp(0.2, 1.0);
-        let panel_height = 30.0 + bounds.h * scale + 18.0;
-        Some((
-            trace,
-            network_scene,
-            network_layout,
-            bounds,
-            scale,
-            panel_height,
-        ))
-    });
+    let exec_panel = show_execution
+        .then_some(options.focus)
+        .flatten()
+        .and_then(|index| {
+            let trace = sim.traces.get(index)?;
+            let network_layout = crate::layout::layout_with(doc, layout_options);
+            let network_scene = crate::render_network::render_network(doc, &network_layout);
+            let bounds = network_scene.bounds()?;
+            let scale = ((width - 64.0) / bounds.w.max(1.0)).clamp(0.2, 1.0);
+            let panel_height = 30.0 + bounds.h * scale + 18.0;
+            Some((
+                trace,
+                network_scene,
+                network_layout,
+                bounds,
+                scale,
+                panel_height,
+            ))
+        });
     let exec_height = exec_panel
         .as_ref()
         .map(|panel| panel.5 + 12.0)
@@ -162,7 +157,7 @@ pub fn render_timing(
         Stroke::new(crate::scene::Color(0, 0, 0, 20), 1.0),
     );
 
-    for (index, node) in lanes.iter().enumerate() {
+    for (index, lane) in lanes.iter().enumerate() {
         let row_y = first_row_y + index as f32 * row_h;
         if !index.is_multiple_of(2) {
             scene.rect(
@@ -179,7 +174,7 @@ pub fn render_timing(
         );
         let baseline = row_y + 33.0;
 
-        let is_cell = node.kind.is_cell();
+        let is_cell = lane.kind == PortType::Cell;
         let kind = if is_cell { "cell" } else { "stream" };
         let kind_color = if is_cell { CELL_INK } else { MUTED };
         let swatch_y = row_y + 20.0;
@@ -192,7 +187,7 @@ pub fn render_timing(
         let name_max = label_w - 38.0 - text_width(kind, 9.5) - 12.0;
         scene.bold_text(
             [38.0, row_y + 21.0],
-            truncate(&node.name, name_max, 13.5),
+            truncate(&lane.label, name_max, 13.5),
             13.5,
             INK,
             TextAnchor::Start,
@@ -217,14 +212,23 @@ pub fn render_timing(
         if is_cell {
             draw_cell(
                 &mut scene,
-                sim.cell(node.id),
+                sim.cell(lane.source),
                 x0,
                 x1,
                 baseline,
                 transaction_end,
+                options.show_values,
             );
         } else {
-            draw_stream(&mut scene, sim.stream(node.id), x0, x1, baseline, map_x);
+            draw_stream(
+                &mut scene,
+                sim.stream(lane.source),
+                x0,
+                x1,
+                baseline,
+                map_x,
+                options.show_values,
+            );
         }
     }
 
@@ -347,7 +351,7 @@ pub fn render_timing(
         }
     }
 
-    if options.show_transactions {
+    if show_annotations && options.show_transactions {
         let canvas = Rect::new(0.0, 0.0, width, height);
         for annotation in &doc.annotations {
             if let Some(AnnotationTarget::Transaction { index }) = &annotation.target {
@@ -371,9 +375,9 @@ pub fn render_timing(
         lanes: lanes
             .iter()
             .enumerate()
-            .map(|(i, n)| {
+            .map(|(i, lane)| {
                 (
-                    n.id,
+                    lane.label.clone(),
                     Rect::new(0.0, first_row_y + i as f32 * row_h, width, row_h),
                 )
             })
@@ -388,6 +392,7 @@ fn draw_stream(
     x1: f32,
     baseline: f32,
     map_x: impl Fn(f64) -> f32,
+    show_values: bool,
 ) {
     if events.is_empty() {
         scene.text(
@@ -402,6 +407,10 @@ fn draw_stream(
     let mut levels: Vec<Vec<(f32, f32)>> = vec![Vec::new(); 4];
     for ev in events {
         let x = map_x(ev.time).clamp(x0, x1 - 6.0);
+        if !show_values {
+            scene.circle([x, baseline], 2.8, INK, None);
+            continue;
+        }
         let size = 12.0;
         let label = timing_label(&ev.value, 20);
         let w = text_width(&label, size) + 13.0;
@@ -457,6 +466,7 @@ fn draw_cell(
     x1: f32,
     baseline: f32,
     transaction_end: impl Fn(f64) -> f32,
+    show_values: bool,
 ) {
     if steps.is_empty() {
         scene.text(
@@ -503,6 +513,9 @@ fn draw_cell(
         scene.line([*x, top], [*x, bottom], Stroke::new(CELL_INK, 1.0));
     }
 
+    if !show_values {
+        return;
+    }
     for (index, step) in steps.iter().enumerate() {
         let start = xs[index];
         let end = xs.get(index + 1).copied().unwrap_or(band_end);

@@ -1,5 +1,6 @@
 pub mod dsl;
 pub mod examples;
+pub mod execution;
 pub mod layout;
 pub mod model;
 pub mod render_annotation;
@@ -9,7 +10,7 @@ pub mod scene;
 pub mod sim;
 
 use layout::{layout_with, LayoutOptions};
-use model::{ComponentDef, Document};
+use model::{ComponentDef, Document, DocumentMode};
 use render_network::{draw_notation_key, render_network};
 use render_timing::{render_timing, TimingOptions};
 use scene::{Scene, TextAnchor, INK, MUTED};
@@ -41,7 +42,9 @@ pub fn render_svgs_with(doc: &Document, timing_options: &TimingOptions) -> SvgBu
 }
 
 pub fn render_svgs_with_options(doc: &Document, options: &RenderOptions) -> SvgBundle {
-    let sim = sim::simulate(doc);
+    let model = execution::build_execution_model(doc);
+    let outer_lanes = model.lanes_for_scope(&execution::ScopeId::Outer);
+    let timing_options = effective_timing_options(doc, &options.timing);
     let network_layout = layout_with(doc, &options.layout);
     let net_scene = render_network(doc, &network_layout);
     let net_bounds = net_scene
@@ -57,7 +60,15 @@ pub fn render_svgs_with_options(doc: &Document, options: &RenderOptions) -> SvgB
     legend.append(&net, 0.0, 0.0);
     let network = legend.to_svg(net_w, net_h, 0.0);
 
-    let timing_view = render_timing(doc, &sim, &options.timing, &options.layout);
+    let timing_view = render_timing(
+        doc,
+        &model.sim,
+        &outer_lanes,
+        &timing_options,
+        &options.layout,
+        true,
+        doc.mode != DocumentMode::Structural,
+    );
     let timing = timing_view
         .scene
         .to_svg(timing_view.width, timing_view.height, 0.0);
@@ -69,6 +80,15 @@ pub fn render_svgs_with_options(doc: &Document, options: &RenderOptions) -> SvgB
         timing,
         combined,
     }
+}
+
+fn effective_timing_options(doc: &Document, options: &TimingOptions) -> TimingOptions {
+    let mut timing = options.clone();
+    if doc.mode == DocumentMode::Structural {
+        timing.show_values = false;
+        timing.focus = None;
+    }
+    timing
 }
 
 fn render_combined(
@@ -126,6 +146,33 @@ pub fn find_component<'a>(doc: &'a Document, name: &str) -> Option<&'a Component
         }
     }
     None
+}
+
+pub fn render_timing_scope_svg(
+    doc: &Document,
+    model: &execution::ExecutionModel,
+    scope: &execution::ScopeId,
+    options: &RenderOptions,
+) -> Option<(String, f32, f32)> {
+    let lanes = model.lanes_for_scope(scope);
+    if lanes.is_empty() {
+        return None;
+    }
+    let timing_options = effective_timing_options(doc, &options.timing);
+    let view = render_timing(
+        doc,
+        &model.sim,
+        &lanes,
+        &timing_options,
+        &options.layout,
+        false,
+        false,
+    );
+    Some((
+        view.scene.to_svg(view.width, view.height, 0.0),
+        view.width,
+        view.height,
+    ))
 }
 
 pub fn render_component_network(
@@ -224,6 +271,57 @@ mod tests {
         let filter_doc = examples::load_example("map_filter").unwrap();
         let filter_bundle = render_svgs(&filter_doc);
         assert!(filter_bundle.network.contains(">filter</text>"));
+    }
+
+    #[test]
+    fn component_size_reserves_space_for_ports() {
+        use crate::model::{Node, PortSpec, PortType};
+        let inputs = vec![
+            PortSpec {
+                name: "sFrame".into(),
+                ty: PortType::Stream,
+            },
+            PortSpec {
+                name: "cLocalKFsBuffer".into(),
+                ty: PortType::Cell,
+            },
+            PortSpec {
+                name: "cReferenceKF".into(),
+                ty: PortType::Cell,
+            },
+        ];
+        let outputs = vec![
+            PortSpec {
+                name: "frameUpdated".into(),
+                ty: PortType::Stream,
+            },
+            PortSpec {
+                name: "localKFsUpdated".into(),
+                ty: PortType::Stream,
+            },
+            PortSpec {
+                name: "referenceKFUpdated".into(),
+                ty: PortType::Stream,
+            },
+            PortSpec {
+                name: "forLocalPoints".into(),
+                ty: PortType::Stream,
+            },
+        ];
+        let node = Node::new(
+            1,
+            NodeKind::Component {
+                definition: None,
+                inputs,
+                outputs,
+                body: Vec::new(),
+            },
+            [0.0, 0.0],
+        );
+        let [width, height] = node.size();
+        assert!(width > 300.0, "width was {width}");
+        assert!(height > 108.0, "height was {height}");
+        let _ = node.name;
     }
 
     #[test]

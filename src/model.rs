@@ -315,6 +315,22 @@ pub struct PortSpec {
     pub ty: PortType,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentMode {
+    #[default]
+    Executable,
+    Structural,
+}
+
+fn is_executable(mode: &DocumentMode) -> bool {
+    *mode == DocumentMode::Executable
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AnnotationTarget {
@@ -532,6 +548,8 @@ pub struct Node {
     pub note: String,
     #[serde(default)]
     pub label: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub display_only: bool,
     pub pos: [f32; 2],
 }
 
@@ -544,6 +562,7 @@ impl Node {
             name,
             note: String::new(),
             label: String::new(),
+            display_only: false,
             pos,
         }
     }
@@ -567,22 +586,28 @@ impl Node {
                 ..
             } => {
                 let name_width = text_width(&self.name, 15.0);
-                let port_width = inputs
+                let left_width = inputs
                     .iter()
-                    .chain(outputs.iter())
+                    .map(|port| text_width(&port.name, 10.5))
+                    .fold(0.0f32, f32::max);
+                let right_width = outputs
+                    .iter()
                     .map(|port| text_width(&port.name, 10.5))
                     .fold(0.0f32, f32::max);
                 let body_width = body
                     .iter()
                     .map(|line| text_width(line, 10.5))
                     .fold(0.0f32, f32::max);
-                let width = name_width
-                    .max(port_width * 2.0 + 44.0)
+                let width = (left_width + right_width + name_width + 56.0)
                     .max(body_width + 34.0)
-                    .clamp(170.0, 300.0);
+                    .clamp(220.0, 620.0);
                 let rows = inputs.len().max(outputs.len()).max(body.len());
                 let height = (86.0 + rows as f32 * 18.0).max(108.0);
                 [width, height]
+            }
+            _ if !self.label.is_empty() => {
+                let width = (text_width(&self.label, 14.0) + 50.0).clamp(170.0, 380.0);
+                [width, 74.0]
             }
             _ => [150.0, 74.0],
         }
@@ -613,6 +638,8 @@ pub struct Edge {
     pub to_port: usize,
     #[serde(default)]
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_width: Option<f32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -627,6 +654,8 @@ pub struct Document {
     pub components: Vec<ComponentDef>,
     #[serde(default)]
     pub annotations: Vec<Annotation>,
+    #[serde(default, skip_serializing_if = "is_executable")]
+    pub mode: DocumentMode,
     #[serde(default = "default_time_end")]
     pub time_end: f64,
 }
@@ -653,6 +682,7 @@ impl Document {
             edges: Vec::new(),
             components: Vec::new(),
             annotations: Vec::new(),
+            mode: DocumentMode::Executable,
             time_end: 6.0,
         }
     }
@@ -765,6 +795,7 @@ impl Document {
             to,
             to_port,
             label: String::new(),
+            label_width: None,
         });
         Ok(id)
     }

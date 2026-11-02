@@ -1,11 +1,20 @@
+use frp_visualizer::execution::{build_execution_model, ScopeId};
 use frp_visualizer::layout::{LayoutOptions, RouteStyle};
 use frp_visualizer::model::Document;
 use frp_visualizer::render_timing::TimingOptions;
 use frp_visualizer::{
-    dsl, examples, export_svgs_to_dir_with, find_component, layout, load_document,
-    render_component_network, render_svgs_with_options, save_document, RenderOptions,
+    dsl, examples, find_component, layout, load_document, render_component_network,
+    render_svgs_with_options, render_timing_scope_svg, save_document, RenderOptions,
 };
 use std::path::PathBuf;
+
+#[derive(Clone, Debug, Default)]
+enum TimingScopeArg {
+    #[default]
+    Outer,
+    All,
+    Component(String),
+}
 
 struct RenderArgs {
     out_dir: String,
@@ -13,6 +22,9 @@ struct RenderArgs {
     focus: Option<usize>,
     route_style: RouteStyle,
     expand: Option<String>,
+    timing_scope: TimingScopeArg,
+    show_values: bool,
+    network_only: bool,
 }
 
 fn main() {
@@ -109,16 +121,26 @@ fn main() {
                     std::process::exit(1);
                 }
             };
+            let strict = args.iter().skip(2).any(|arg| arg == "--strict");
+            let report = frp_visualizer::sim::validate_document(&doc);
+            for error in &report.errors {
+                eprintln!("error: {error}");
+            }
+            for warning in &report.warnings {
+                eprintln!("warning: {warning}");
+            }
             println!(
-                "{}: {} nodes, {} edges, {} components, {} annotations",
+                "{}: {} nodes, {} edges, {} components, {} annotations, {} errors, {} warnings",
                 doc.title,
                 doc.nodes.len(),
                 doc.edges.len(),
                 doc.components.len(),
-                doc.annotations.len()
+                doc.annotations.len(),
+                report.errors.len(),
+                report.warnings.len()
             );
-            for warning in frp_visualizer::sim::simulate(&doc).warnings {
-                eprintln!("warning: {warning}");
+            if !report.errors.is_empty() || (strict && !report.warnings.is_empty()) {
+                std::process::exit(2);
             }
         }
         "render-example" => {
@@ -167,6 +189,9 @@ fn render_args(args: &[String], start: usize) -> RenderArgs {
     let mut focus = None;
     let mut route_style = RouteStyle::default();
     let mut expand = None;
+    let mut timing_scope = TimingScopeArg::Outer;
+    let mut show_values = true;
+    let mut network_only = false;
     let mut iter = args.iter().skip(start);
     while let Some(arg) = iter.next() {
         if arg == "--auto-layout" {
@@ -195,6 +220,34 @@ fn render_args(args: &[String], start: usize) -> RenderArgs {
             expand = Some(value.clone());
         } else if let Some(value) = arg.strip_prefix("--expand=") {
             expand = Some(value.to_string());
+        } else if arg == "--timing-scope" {
+            let Some(value) = iter.next() else {
+                eprintln!("--timing-scope requires outer, all, or component:<name>");
+                std::process::exit(2);
+            };
+            timing_scope = parse_timing_scope(value);
+        } else if let Some(value) = arg.strip_prefix("--timing-scope=") {
+            timing_scope = parse_timing_scope(value);
+        } else if arg == "--timing-values" {
+            let Some(value) = iter.next() else {
+                eprintln!("--timing-values requires values or none");
+                std::process::exit(2);
+            };
+            show_values = parse_timing_values(value);
+        } else if let Some(value) = arg.strip_prefix("--timing-values=") {
+            show_values = parse_timing_values(value);
+        } else if arg == "--no-timing-values" {
+            show_values = false;
+        } else if arg == "--output" {
+            let Some(value) = iter.next() else {
+                eprintln!("--output requires all or network");
+                std::process::exit(2);
+            };
+            network_only = parse_output(value);
+        } else if let Some(value) = arg.strip_prefix("--output=") {
+            network_only = parse_output(value);
+        } else if arg == "--network-only" {
+            network_only = true;
         } else if out_dir.is_none() {
             out_dir = Some(arg.clone());
         }
@@ -205,6 +258,45 @@ fn render_args(args: &[String], start: usize) -> RenderArgs {
         focus,
         route_style,
         expand,
+        timing_scope,
+        show_values,
+        network_only,
+    }
+}
+
+fn parse_output(value: &str) -> bool {
+    match value {
+        "all" => false,
+        "network" => true,
+        other => {
+            eprintln!("unknown output mode: {other} (use all or network)");
+            std::process::exit(2);
+        }
+    }
+}
+
+fn parse_timing_scope(value: &str) -> TimingScopeArg {
+    match value {
+        "outer" => TimingScopeArg::Outer,
+        "all" => TimingScopeArg::All,
+        other => match other.strip_prefix("component:") {
+            Some(name) if !name.is_empty() => TimingScopeArg::Component(name.to_string()),
+            _ => {
+                eprintln!("unknown timing scope: {other}");
+                std::process::exit(2);
+            }
+        },
+    }
+}
+
+fn parse_timing_values(value: &str) -> bool {
+    match value {
+        "values" | "all" => true,
+        "none" | "off" => false,
+        other => {
+            eprintln!("unknown timing values mode: {other} (use values or none)");
+            std::process::exit(2);
+        }
     }
 }
 
@@ -244,61 +336,112 @@ fn render_to_dir(mut doc: Document, args: RenderArgs) {
     if args.auto_layout {
         layout::auto_layout_tree(&mut doc);
     }
-    for warning in frp_visualizer::sim::simulate(&doc).warnings {
-        eprintln!("warning: {warning}");
-    }
     let options = RenderOptions {
         timing: TimingOptions {
             focus: args.focus,
+            show_values: args.show_values,
             ..Default::default()
         },
         layout: LayoutOptions {
             route_style: args.route_style,
         },
     };
+    let model = build_execution_model(&doc);
+    for warning in &model.sim.warnings {
+        eprintln!("warning: {warning}");
+    }
     let dir = PathBuf::from(&args.out_dir);
-    match export_svgs_to_dir_with(&doc, &dir, &options) {
-        Ok(paths) => {
-            for path in paths {
-                println!("wrote {}", path.display());
-            }
-            let json_path = dir.join("diagram.json");
-            if let Err(err) = save_document(&doc, &json_path) {
-                eprintln!("failed to write {}: {err}", json_path.display());
-            } else {
-                println!("wrote {}", json_path.display());
-            }
-            let bundle = render_svgs_with_options(&doc, &options);
-            println!(
-                "network: {} chars, timing: {} chars, combined: {} chars",
-                bundle.network.len(),
-                bundle.timing.len(),
-                bundle.combined.len()
-            );
-            if let Some(name) = &args.expand {
-                match render_component_network(&doc, name, &options) {
-                    Some(svg) => {
-                        let file = dir.join(format!("expanded_{}.svg", safe_name(name)));
-                        if let Err(err) = std::fs::write(&file, svg) {
-                            eprintln!("failed to write {}: {err}", file.display());
-                        } else {
-                            println!("wrote {}", file.display());
-                        }
-                    }
-                    None => eprintln!("component not found: {name}"),
-                }
-                if let Some(definition) = find_component(&doc, name) {
-                    let json_path = dir.join(format!("expanded_{}.json", safe_name(name)));
-                    match save_document(&definition.doc, &json_path) {
-                        Ok(()) => println!("wrote {}", json_path.display()),
-                        Err(err) => eprintln!("failed to write {}: {err}", json_path.display()),
-                    }
-                }
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        eprintln!("failed to create {}: {err}", dir.display());
+        std::process::exit(1);
+    }
+    let bundle = render_svgs_with_options(&doc, &options);
+    let files: Vec<(&str, &str)> = if args.network_only {
+        vec![("network.svg", bundle.network.as_str())]
+    } else {
+        vec![
+            ("network.svg", bundle.network.as_str()),
+            ("timing.svg", bundle.timing.as_str()),
+            ("diagram.svg", bundle.combined.as_str()),
+        ]
+    };
+    for (name, contents) in files {
+        let path = dir.join(name);
+        if let Err(err) = std::fs::write(&path, contents) {
+            eprintln!("failed to write {}: {err}", path.display());
+            std::process::exit(1);
+        }
+        println!("wrote {}", path.display());
+    }
+    let json_path = dir.join("diagram.json");
+    if let Err(err) = save_document(&doc, &json_path) {
+        eprintln!("failed to write {}: {err}", json_path.display());
+    } else {
+        println!("wrote {}", json_path.display());
+    }
+    println!(
+        "network: {} chars, timing: {} chars, combined: {} chars",
+        bundle.network.len(),
+        bundle.timing.len(),
+        bundle.combined.len()
+    );
+    let scopes: Vec<ScopeId> = if args.network_only {
+        Vec::new()
+    } else {
+        match &args.timing_scope {
+            TimingScopeArg::Outer => Vec::new(),
+            TimingScopeArg::All => model
+                .component_scopes
+                .iter()
+                .map(|(id, _)| ScopeId::Component(*id))
+                .collect(),
+            TimingScopeArg::Component(name) => model
+                .component_scopes
+                .iter()
+                .find(|(_, label)| label == name)
+                .map(|(id, _)| vec![ScopeId::Component(*id)])
+                .unwrap_or_else(|| {
+                    eprintln!("component scope not found: {name}");
+                    Vec::new()
+                }),
+        }
+    };
+    let mut used_names = std::collections::HashSet::new();
+    for scope in scopes {
+        let Some((svg, _, _)) = render_timing_scope_svg(&doc, &model, &scope, &options) else {
+            continue;
+        };
+        let mut name = safe_name(&scope.label(&doc));
+        if !used_names.insert(name.clone()) {
+            if let ScopeId::Component(id) = scope {
+                name = format!("{name}_{id}");
             }
         }
-        Err(err) => {
-            eprintln!("failed to render: {err}");
-            std::process::exit(1);
+        let file = dir.join(format!("timing_{name}.svg"));
+        if let Err(err) = std::fs::write(&file, svg) {
+            eprintln!("failed to write {}: {err}", file.display());
+        } else {
+            println!("wrote {}", file.display());
+        }
+    }
+    if let Some(name) = &args.expand {
+        match render_component_network(&doc, name, &options) {
+            Some(svg) => {
+                let file = dir.join(format!("expanded_{}.svg", safe_name(name)));
+                if let Err(err) = std::fs::write(&file, svg) {
+                    eprintln!("failed to write {}: {err}", file.display());
+                } else {
+                    println!("wrote {}", file.display());
+                }
+            }
+            None => eprintln!("component not found: {name}"),
+        }
+        if let Some(definition) = find_component(&doc, name) {
+            let json_path = dir.join(format!("expanded_{}.json", safe_name(name)));
+            match save_document(&definition.doc, &json_path) {
+                Ok(()) => println!("wrote {}", json_path.display()),
+                Err(err) => eprintln!("failed to write {}: {err}", json_path.display()),
+            }
         }
     }
 }
@@ -311,9 +454,9 @@ fn usage() {
            frp-visualizer list                  list built-in examples\n\
            frp-visualizer example <name> [out]  write an example as JSON\n\
            frp-visualizer compile <diagram.frp> [out.json] [--auto-layout]\n\
-           frp-visualizer check <diagram.frp|diagram.json>\n\
-           frp-visualizer render <json|frp> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component]\n\
-           frp-visualizer render-example <name> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component]\n\
+           frp-visualizer check <diagram.frp|diagram.json> [--strict]\n\
+           frp-visualizer render <json|frp> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component] [--timing-scope outer|all|component:<name>] [--timing-values values|none] [--output all|network]\n\
+           frp-visualizer render-example <name> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component] [--timing-scope outer|all|component:<name>] [--timing-values values|none] [--output all|network]\n\
          \n\
          default route: orthogonal (use --route hybrid for diagonal wires)\n"
     );

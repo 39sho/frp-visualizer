@@ -1,4 +1,6 @@
-use crate::model::{ComponentDef, Document, Edge, NodeId, NodeKind, PortSpec, PortType, Value};
+use crate::model::{
+    ComponentDef, Document, DocumentMode, Edge, NodeId, NodeKind, PortSpec, PortType, Value,
+};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
@@ -21,6 +23,22 @@ pub struct TransactionTrace {
     pub cell_before: HashMap<NodeId, Value>,
     pub cell_after: HashMap<NodeId, Value>,
     pub updates: HashMap<NodeId, Value>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Origin {
+    Internal { component: NodeId },
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct FlattenedDocument {
+    pub doc: Document,
+    pub warnings: Vec<String>,
+    pub origins: HashMap<NodeId, Origin>,
+    pub component_inputs: HashMap<(NodeId, usize), (NodeId, usize)>,
+    pub component_outputs: HashMap<(NodeId, usize), (NodeId, usize)>,
+    pub scopes: HashMap<NodeId, Vec<NodeId>>,
+    pub sinks: HashMap<NodeId, (NodeId, usize)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -46,11 +64,17 @@ impl Simulation {
 const MAX_COMPONENT_EXPANSIONS: usize = 64;
 
 pub fn flatten_components(doc: &Document) -> (Document, Vec<String>) {
+    let flattened = flatten_document(doc);
+    (flattened.doc, flattened.warnings)
+}
+
+pub fn flatten_document(doc: &Document) -> FlattenedDocument {
     let mut definitions = std::collections::HashMap::new();
     let mut warnings = Vec::new();
     collect_component_defs(doc, &mut definitions, &mut warnings);
     let mut flat = doc.clone();
     flat.components.clear();
+    let original_nodes: HashSet<NodeId> = doc.nodes.iter().map(|node| node.id).collect();
     let mut context = FlattenContext {
         definitions,
         warnings,
@@ -58,9 +82,25 @@ pub fn flatten_components(doc: &Document) -> (Document, Vec<String>) {
         next_edge_id: flat.edges.iter().map(|edge| edge.id).max().unwrap_or(0) + 1,
         processed: HashSet::new(),
         expansions: 0,
+        original_nodes,
+        owner_of: HashMap::new(),
+        origins: HashMap::new(),
+        component_inputs_pending: HashMap::new(),
+        component_outputs: HashMap::new(),
+        scopes: HashMap::new(),
+        sinks: HashMap::new(),
     };
     context.expand_all(&mut flat);
-    (flat, context.warnings)
+    context.resolve_mappings(&flat, doc);
+    FlattenedDocument {
+        doc: flat,
+        warnings: context.warnings,
+        origins: context.origins,
+        component_inputs: context.component_inputs_pending,
+        component_outputs: context.component_outputs,
+        scopes: context.scopes,
+        sinks: context.sinks,
+    }
 }
 
 fn collect_component_defs(
@@ -88,6 +128,13 @@ struct FlattenContext {
     next_edge_id: u64,
     processed: HashSet<NodeId>,
     expansions: usize,
+    original_nodes: HashSet<NodeId>,
+    owner_of: HashMap<NodeId, NodeId>,
+    origins: HashMap<NodeId, Origin>,
+    component_inputs_pending: HashMap<(NodeId, usize), (NodeId, usize)>,
+    component_outputs: HashMap<(NodeId, usize), (NodeId, usize)>,
+    scopes: HashMap<NodeId, Vec<NodeId>>,
+    sinks: HashMap<NodeId, (NodeId, usize)>,
 }
 
 impl FlattenContext {
@@ -119,6 +166,51 @@ impl FlattenContext {
         }
     }
 
+    fn resolve_mappings(&mut self, flat: &Document, source: &Document) {
+        let output_keys: Vec<(NodeId, usize)> = self.component_outputs.keys().copied().collect();
+        for key in output_keys {
+            let (mut node, mut port) = self.component_outputs[&key];
+            for _ in 0..MAX_COMPONENT_EXPANSIONS {
+                if let Some(&(next_node, next_port)) = self.component_outputs.get(&(node, port)) {
+                    if next_node == node && next_port == port {
+                        break;
+                    }
+                    node = next_node;
+                    port = next_port;
+                } else {
+                    break;
+                }
+            }
+            self.component_outputs.insert(key, (node, port));
+        }
+
+        let input_keys: Vec<(NodeId, usize)> =
+            self.component_inputs_pending.keys().copied().collect();
+        for key in input_keys {
+            let (mut node, mut port) = self.component_inputs_pending[&key];
+            for _ in 0..MAX_COMPONENT_EXPANSIONS {
+                if let Some(&(next_node, next_port)) = self.component_outputs.get(&(node, port)) {
+                    if next_node == node && next_port == port {
+                        break;
+                    }
+                    node = next_node;
+                    port = next_port;
+                } else {
+                    break;
+                }
+            }
+            self.component_inputs_pending.insert(key, (node, port));
+        }
+
+        for node in &source.nodes {
+            if node.kind.is_sink() {
+                if let Some(edge) = flat.edges.iter().find(|edge| edge.to == node.id) {
+                    self.sinks.insert(node.id, (edge.from, edge.from_port));
+                }
+            }
+        }
+    }
+
     fn expand_component(&mut self, doc: &mut Document, component: &crate::model::Node) -> bool {
         let NodeKind::Component {
             definition,
@@ -145,6 +237,14 @@ impl FlattenContext {
         } else {
             outputs
         };
+        let owner = if self.original_nodes.contains(&component.id) {
+            component.id
+        } else {
+            self.owner_of
+                .get(&component.id)
+                .copied()
+                .unwrap_or(component.id)
+        };
 
         let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
         for node in &definition.doc.nodes {
@@ -160,6 +260,10 @@ impl FlattenContext {
             let mut cloned = node.clone();
             cloned.id = id_map[&node.id];
             cloned.name = format!("{prefix}/{}", cloned.name);
+            self.owner_of.insert(cloned.id, owner);
+            self.scopes.entry(owner).or_default().push(cloned.id);
+            self.origins
+                .insert(cloned.id, Origin::Internal { component: owner });
             doc.nodes.push(cloned);
         }
         let mut internal_edges = Vec::new();
@@ -176,6 +280,7 @@ impl FlattenContext {
                 to,
                 to_port: edge.to_port,
                 label: edge.label.clone(),
+                label_width: edge.label_width,
             });
         }
         doc.edges.extend(internal_edges);
@@ -222,6 +327,10 @@ impl FlattenContext {
                 .find(|edge| edge.to == component.id && edge.to_port == port_index)
                 .cloned();
             if let Some(outer_edge) = outer_edge {
+                self.component_inputs_pending.insert(
+                    (component.id, port_index),
+                    (outer_edge.from, outer_edge.from_port),
+                );
                 for edge in doc.edges.iter_mut().filter(|edge| edge.from == internal_id) {
                     edge.from = outer_edge.from;
                     edge.from_port = outer_edge.from_port;
@@ -252,6 +361,8 @@ impl FlattenContext {
             if let Some(internal_edge) = internal_edge {
                 let producer = internal_edge.from;
                 let producer_port = internal_edge.from_port;
+                self.component_outputs
+                    .insert((component.id, port_index), (producer, producer_port));
                 if let Some(producer_type) = doc
                     .node(producer)
                     .and_then(|node| node.kind.output_types().get(producer_port).copied())
@@ -295,19 +406,77 @@ impl FlattenContext {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ValidationReport {
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+pub fn validate_document(doc: &Document) -> ValidationReport {
+    let structural = doc.mode == DocumentMode::Structural;
+    let flattened = flatten_document(doc);
+    let simulation = simulate_flat(&flattened.doc);
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+
+    for warning in flattened.warnings {
+        if structural {
+            warnings.push(warning);
+        } else {
+            errors.push(warning);
+        }
+    }
+
+    for warning in simulation.warnings {
+        if warning.contains("Display-only") {
+            if !structural {
+                errors.push(warning);
+            }
+        } else if !structural
+            && (warning.contains("input connected")
+                || warning.contains("Simultaneous")
+                || warning.contains("multiple events"))
+        {
+            errors.push(warning);
+        } else {
+            warnings.push(warning);
+        }
+    }
+
+    ValidationReport { errors, warnings }
+}
+
 pub fn simulate(doc: &Document) -> Simulation {
-    let (flat, flatten_warnings) = flatten_components(doc);
-    let mut simulation = simulate_flat(&flat);
-    let mut warnings = flatten_warnings;
-    warnings.extend(simulation.warnings);
+    simulate_with_mapping(doc).0
+}
+
+pub fn simulate_with_mapping(doc: &Document) -> (Simulation, FlattenedDocument) {
+    let flattened = flatten_document(doc);
+    let mut simulation = simulate_flat(&flattened.doc);
+    let mut warnings = flattened.warnings.clone();
+    warnings.extend(simulation.warnings.clone());
     simulation.warnings = warnings;
-    simulation
+    (simulation, flattened)
 }
 
 fn simulate_flat(doc: &Document) -> Simulation {
     let end_time = doc.effective_end_time();
     let mut warnings = Vec::new();
     let mut warning_set: HashSet<String> = HashSet::new();
+    if doc.mode == DocumentMode::Executable {
+        for node in &doc.nodes {
+            if node.display_only {
+                add_warning(
+                    &mut warnings,
+                    &mut warning_set,
+                    format!(
+                        "Display-only node '{}' is not executable; its values are placeholders",
+                        node.name
+                    ),
+                );
+            }
+        }
+    }
 
     let mut input_events: HashMap<NodeId, HashMap<u64, Value>> = HashMap::new();
     for node in &doc.nodes {
@@ -1191,6 +1360,56 @@ mod tests {
                 .collect();
             assert_eq!(values, vec!["1", "2"]);
         }
+    }
+
+    #[test]
+    fn validation_reports_missing_required_inputs() {
+        let mut doc = Document::blank();
+        doc.add_node(
+            NodeKind::Map {
+                op: UnaryOp::Identity,
+            },
+            [0.0, 0.0],
+        );
+        let report = validate_document(&doc);
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("input connected")));
+    }
+
+    #[test]
+    fn validation_accepts_all_examples() {
+        for (_, key) in crate::examples::EXAMPLES {
+            let doc = crate::examples::load_example(key).unwrap();
+            let report = validate_document(&doc);
+            assert!(report.errors.is_empty(), "{key}: {:?}", report.errors);
+        }
+    }
+
+    #[test]
+    fn validation_treats_simultaneous_events_as_errors() {
+        let mut doc = Document::blank();
+        let a = doc.add_node(
+            NodeKind::InputEvent {
+                events: vec![TimedValue::new(1.0, Value::Number(1.0))],
+            },
+            [0.0, 0.0],
+        );
+        let b = doc.add_node(
+            NodeKind::InputEvent {
+                events: vec![TimedValue::new(1.0, Value::Number(2.0))],
+            },
+            [0.0, 100.0],
+        );
+        let merge = doc.add_node(NodeKind::Merge, [200.0, 50.0]);
+        doc.add_edge(a, merge, 0).unwrap();
+        doc.add_edge(b, merge, 1).unwrap();
+        let report = validate_document(&doc);
+        assert!(report
+            .errors
+            .iter()
+            .any(|error| error.contains("Simultaneous")));
     }
 
     #[test]
