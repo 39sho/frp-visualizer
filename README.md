@@ -17,6 +17,7 @@ FRP（Functional Reactive Programming）の **Stream / Cell ネットワーク�
 - Cell を帯で示すタイミング図、トランザクション開始／終了ティック
 - **Component 雲**（入出力ポート・多出力・内部ネットワークの展開表示・内部状態を含むシミュレーション）
 - Node / Edge / Transaction に紐づく**注釈吹き出し**
+- Mermaid 風の**テキスト DSL** から JSON への一方向コンパイル
 - `--focus-transaction N` による実行フォーカスパネル
 - 手動レイアウトと `--auto-layout` の両対応
 - ストリームは実線、セルは青の破線（モノクロでも判別可能）
@@ -46,8 +47,12 @@ frp-visualizer list
 # JSON として書き出す
 frp-visualizer example accumulator accumulator.json
 
+# DSL を JSON にコンパイル
+frp-visualizer compile examples/calibration.frp calibration.json
+
 # network.svg / timing.svg / diagram.svg / diagram.json を出力
 frp-visualizer render accumulator.json out
+frp-visualizer render examples/calibration.frp out
 
 # 組み込み example を直接出力
 frp-visualizer render-example calibration out --auto-layout
@@ -66,7 +71,9 @@ frp-visualizer render-example component out --expand accumulate
 ```text
 frp-visualizer list
 frp-visualizer example <name> [out.json]
-frp-visualizer render <diagram.json> [out_dir] [options]
+frp-visualizer compile <diagram.frp> [out.json] [--auto-layout]
+frp-visualizer check <diagram.frp|diagram.json>
+frp-visualizer render <diagram.json|diagram.frp> [out_dir] [options]
 frp-visualizer render-example <name> [out_dir] [options]
 ```
 
@@ -111,9 +118,55 @@ frp-visualizer render-example <name> [out_dir] [options]
 
 ![Execution](docs/examples/execution.svg)
 
+## DSL
+
+JSON は IR / 外部ツール連携用で、手で管理するなら Mermaid 風の DSL を推奨します。**DSL → JSON の一方向変換**です。
+
+```text
+diagram Calibration
+time_end 6
+layout auto
+
+stream sClearAccumulator events 3:()
+stream sDelta events 1:5, 2:10, 4:-3, 5:8
+cell calibration = 1 changes 4:2
+
+map clearZero = const 0
+snapshot total = add
+merge merged
+hold accum = 0
+lift scaled = mul
+sink out
+
+sClearAccumulator -> clearZero
+clearZero -> merged.left
+sDelta -> total.event
+accum -> total.cell
+total -> merged.right
+merged -> accum
+accum -> scaled.a
+calibration -> scaled.b
+scaled -> out
+```
+
+```sh
+frp-visualizer check examples/calibration.frp
+frp-visualizer compile examples/calibration.frp calibration.json
+frp-visualizer render examples/calibration.frp out
+```
+
+- `layout auto` / `layout manual`、ノードごとの `at x,y` に対応
+- `stream` / `cell` / `map` / `filter` / `merge` / `snapshot` / `hold` / `lift` / `never` / `sink`
+- `component <name> { ... }` で Component を定義し、`component <instance> = <definition>` で配置
+- ポートは `merged.left`、`total.event`、`component.port` のように指定
+- `note "..." on <node>` / `note "..." on tx <N>` で注釈
+- Component は定義を先に書き、その後にインスタンスを配置
+
+完全な例は [`examples/calibration.frp`](examples/calibration.frp)、[`examples/component.frp`](examples/component.frp)、[`examples/annotation.frp`](examples/annotation.frp) にあります。
+
 ## JSON format
 
-`frp-visualizer example accumulator` で完全な例を確認できます。主なフィールド:
+JSON はコンパイル済みの IR です。`frp-visualizer example accumulator` で完全な例を確認できます。主なフィールド:
 
 - `nodes`: `id` / `kind` / `name` / `pos` / `note` / `label`
 - `edges`: `from` / `from_port` / `to` / `to_port` / `label`
