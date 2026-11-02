@@ -21,3 +21,7 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --all-targets --locked
       - run: cargo build --release --locked
+      - run: ./target/release/frp-visualizer check examples/calibration.frp --strict
+      - run: ./target/release/frp-visualizer check examples/component.frp --strict
+      - run: ./target/release/frp-visualizer render examples/component.frp /tmp/frp-visualizer-check --timing-scope all --timing-values none
+      - run: test -f /tmp/frp-visualizer-check/timing_accumulate.svg
