@@ -18,7 +18,9 @@ FRP（Functional Reactive Programming）の **Stream / Cell ネットワーク�
 - **Component 雲**（入出力ポート・多出力・内部ネットワークの展開表示・内部状態を含むシミュレーション）
 - Sink / Component 出力の lane 化と、Component 内部スコープの timing 生成
 - 値を出さない **event-only timing**（`--timing-values none`）
-- `check --strict` による欠落入力・不正接続の検出
+- focus した Transaction の **active サブグラフを timing 内に表示**
+- `trace.json`（Transaction / lane / event / value / timing reliability）
+- `check --strict` と render 時の検証による欠落入力・不正接続の検出
 - Node / Edge / Transaction に紐づく**注釈吹き出し**
 - Mermaid 風の**テキスト DSL** から JSON への一方向コンパイル
 - 構造スケッチ用の **structural mode** と表示専用 `display` ラベル
@@ -66,9 +68,13 @@ frp-visualizer render-example calibration out --focus-transaction 2
 
 # Component の内部ネットワークも出力
 frp-visualizer render-example component out --expand accumulate
+frp-visualizer render-example component out --expand-all
 
 # 全体＋内部スコープの timing を生成
 frp-visualizer render examples/component.frp out --timing-scope all
+
+# focus した Transaction の active サブグラフを表示
+frp-visualizer render examples/component.frp out --focus-transaction 1
 
 # イベント時刻だけを表示（値は出さない）
 frp-visualizer render examples/structural.frp out --timing-values none
@@ -96,6 +102,8 @@ frp-visualizer render-example <name> [out_dir] [options]
 | `--expand <component>` | 指定 Component の内部ネットワークを `expanded_<name>.svg` / `.json` に出力 |
 | `--timing-scope outer|all|component:<name>` | タイミング図のスコープ。`all` で全体＋各 Component 内部を出力 |
 | `--timing-values values|none` | イベント値を表示するか。`none` は時刻のみ |
+| `--timing-network focus|none` | focus 時に active サブグラフを表示するか |
+| `--expand-all` | すべての Component 内部ネットワークを出力 |
 | `--output all|network` | `network` は network.svg のみ出力（構造スケッチ向け） |
 
 ## Examples
@@ -135,7 +143,9 @@ frp-visualizer render-example <name> [out_dir] [options]
 frp-visualizer render examples/component.frp out --timing-scope all --timing-values none
 ```
 
-`--timing-values none` は値を出さず、イベントの発火時刻と件数だけを表示します。
+`--timing-values none` は値を出さず、イベントの発火時刻と件数だけを表示します。`--focus-transaction N` と組み合わせると、その Transaction で active なノードと接続だけを timing 内のインセットに表示します。値・副作用の計算は行いません。
+
+`render` は検証エラーがある文書を書き出しません。`check --strict` と併用してください。`trace.json` には `timing_reliable` / `values_reliable` と、Transaction ごとの events / cell updates、lane ごとの event/step が入ります。
 
 ### Execution focus
 

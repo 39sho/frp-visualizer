@@ -23,5 +23,7 @@ jobs:
       - run: cargo build --release --locked
       - run: ./target/release/frp-visualizer check examples/calibration.frp --strict
       - run: ./target/release/frp-visualizer check examples/component.frp --strict
-      - run: ./target/release/frp-visualizer render examples/component.frp /tmp/frp-visualizer-check --timing-scope all --timing-values none
+      - run: ./target/release/frp-visualizer render examples/component.frp /tmp/frp-visualizer-check --timing-scope all --timing-values none --focus-transaction 1 --expand-all
       - run: test -f /tmp/frp-visualizer-check/timing_accumulate.svg
+      - run: test -f /tmp/frp-visualizer-check/expanded_accumulate.svg
+      - run: jq -e '.timing_reliable == true and .values_reliable == true' /tmp/frp-visualizer-check/trace.json
