@@ -1,3 +1,4 @@
+pub mod dsl;
 pub mod examples;
 pub mod layout;
 pub mod model;

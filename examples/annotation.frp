@@ -1,0 +1,12 @@
+diagram Annotations — network callout
+time_end 4
+layout auto
+
+stream sNumber events 1:1, 2:2, 3:3
+map increment = add 1
+sink out
+
+sNumber -> increment
+increment -> out
+
+note "each event is incremented by one" on increment at 300,260

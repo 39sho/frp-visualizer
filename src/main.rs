@@ -2,7 +2,7 @@ use frp_visualizer::layout::{LayoutOptions, RouteStyle};
 use frp_visualizer::model::Document;
 use frp_visualizer::render_timing::TimingOptions;
 use frp_visualizer::{
-    examples, export_svgs_to_dir_with, find_component, layout, load_document,
+    dsl, examples, export_svgs_to_dir_with, find_component, layout, load_document,
     render_component_network, render_svgs_with_options, save_document, RenderOptions,
 };
 use std::path::PathBuf;
@@ -51,12 +51,12 @@ fn main() {
         "render" => {
             let Some(input) = args.get(1) else {
                 eprintln!(
-                    "usage: frp-visualizer render <diagram.json> [out_dir] [--auto-layout] [--focus-transaction N]"
+                    "usage: frp-visualizer render <diagram.json|diagram.frp> [out_dir] [--auto-layout] [--focus-transaction N]"
                 );
                 std::process::exit(2);
             };
             let path = PathBuf::from(input);
-            let doc = match load_document(&path) {
+            let doc = match load_input(&path) {
                 Ok(doc) => doc,
                 Err(err) => {
                     eprintln!("failed to load {input}: {err}");
@@ -64,6 +64,62 @@ fn main() {
                 }
             };
             render_to_dir(doc, render_args(&args, 2));
+        }
+        "compile" => {
+            let Some(input) = args.get(1) else {
+                eprintln!("usage: frp-visualizer compile <diagram.frp> [out.json] [--auto-layout]");
+                std::process::exit(2);
+            };
+            let path = PathBuf::from(input);
+            let parsed = match dsl::parse_file(&path) {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    eprintln!("failed to parse {input}: {err}");
+                    std::process::exit(1);
+                }
+            };
+            let mut doc = parsed.doc;
+            if args.iter().skip(2).any(|arg| arg == "--auto-layout") {
+                layout::auto_layout_tree(&mut doc);
+            }
+            let out = args
+                .iter()
+                .skip(2)
+                .find(|arg| !arg.starts_with("--"))
+                .map(PathBuf::from)
+                .unwrap_or_else(|| path.with_extension("json"));
+            match save_document(&doc, &out) {
+                Ok(()) => println!("wrote {}", out.display()),
+                Err(err) => {
+                    eprintln!("failed to write {}: {err}", out.display());
+                    std::process::exit(1);
+                }
+            }
+        }
+        "check" => {
+            let Some(input) = args.get(1) else {
+                eprintln!("usage: frp-visualizer check <diagram.frp|diagram.json>");
+                std::process::exit(2);
+            };
+            let path = PathBuf::from(input);
+            let doc = match load_input(&path) {
+                Ok(doc) => doc,
+                Err(err) => {
+                    eprintln!("failed to load {input}: {err}");
+                    std::process::exit(1);
+                }
+            };
+            println!(
+                "{}: {} nodes, {} edges, {} components, {} annotations",
+                doc.title,
+                doc.nodes.len(),
+                doc.edges.len(),
+                doc.components.len(),
+                doc.annotations.len()
+            );
+            for warning in frp_visualizer::sim::simulate(&doc).warnings {
+                eprintln!("warning: {warning}");
+            }
         }
         "render-example" => {
             let Some(name) = args.get(1) else {
@@ -79,9 +135,9 @@ fn main() {
             render_to_dir(doc, render_args(&args, 2));
         }
         other => {
-            if other.ends_with(".json") {
+            if other.ends_with(".json") || other.ends_with(".frp") {
                 let path = PathBuf::from(other);
-                match load_document(&path) {
+                match load_input(&path) {
                     Ok(doc) => render_to_dir(doc, render_args(&args, 1)),
                     Err(err) => {
                         eprintln!("failed to load {other}: {err}");
@@ -94,6 +150,14 @@ fn main() {
                 std::process::exit(2);
             }
         }
+    }
+}
+
+fn load_input(path: &std::path::Path) -> Result<Document, String> {
+    if path.extension().and_then(|extension| extension.to_str()) == Some("frp") {
+        dsl::parse_file(path).map(|parsed| parsed.doc)
+    } else {
+        load_document(path)
     }
 }
 
@@ -178,7 +242,7 @@ fn parse_focus(value: &str) -> usize {
 
 fn render_to_dir(mut doc: Document, args: RenderArgs) {
     if args.auto_layout {
-        layout::auto_layout(&mut doc);
+        layout::auto_layout_tree(&mut doc);
     }
     for warning in frp_visualizer::sim::simulate(&doc).warnings {
         eprintln!("warning: {warning}");
@@ -246,7 +310,9 @@ fn usage() {
          usage:\n\
            frp-visualizer list                  list built-in examples\n\
            frp-visualizer example <name> [out]  write an example as JSON\n\
-           frp-visualizer render <json> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component]\n\
+           frp-visualizer compile <diagram.frp> [out.json] [--auto-layout]\n\
+           frp-visualizer check <diagram.frp|diagram.json>\n\
+           frp-visualizer render <json|frp> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component]\n\
            frp-visualizer render-example <name> [dir] [--auto-layout] [--focus-transaction N] [--route hybrid|orthogonal] [--expand component]\n\
          \n\
          default route: orthogonal (use --route hybrid for diagonal wires)\n"

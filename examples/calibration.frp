@@ -1,0 +1,24 @@
+diagram Calibration — clearing and scaling an accumulator
+time_end 6
+layout auto
+
+stream sClearAccumulator events 3:()
+stream sDelta events 1:5, 2:10, 4:-3, 5:8
+cell calibration = 1 changes 4:2
+
+map clearZero = const 0
+snapshot total = add
+merge merged
+hold accum = 0
+lift scaled = mul
+sink out
+
+sClearAccumulator -> clearZero
+clearZero -> merged.left
+sDelta -> total.event
+accum -> total.cell
+total -> merged.right
+merged -> accum
+accum -> scaled.a
+calibration -> scaled.b
+scaled -> out

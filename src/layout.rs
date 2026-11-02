@@ -1013,6 +1013,13 @@ pub fn output_port_pos(node: &crate::model::Node, rect: Rect, port: usize) -> [f
     [rect.right(), rect.y + rect.h * t]
 }
 
+pub fn auto_layout_tree(doc: &mut Document) {
+    auto_layout(doc);
+    for definition in &mut doc.components {
+        auto_layout_tree(&mut definition.doc);
+    }
+}
+
 pub fn auto_layout(doc: &mut Document) {
     if doc.nodes.is_empty() {
         return;

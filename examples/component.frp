@@ -1,0 +1,38 @@
+diagram Component — accumulate cloud
+time_end 6
+layout auto
+
+component accumulate {
+  in delta: stream
+  in clear: stream
+  out total: stream
+  out state: cell
+  body "hold · snapshot"
+
+  map clearZero = const 0
+  snapshot snap = add
+  merge merged
+  hold accum = 0
+
+  clear -> clearZero
+  clearZero -> merged.left
+  delta -> snap.event
+  accum -> snap.cell
+  snap -> merged.right
+  merged -> accum
+  merged -> total
+  accum -> state
+}
+
+stream sDelta events 1:5, 2:10, 4:-3, 5:8
+stream sClear events 3:()
+component accumulate = accumulate
+map observed = identity
+sink out
+sink state
+
+sDelta -> accumulate.delta
+sClear -> accumulate.clear
+accumulate.total -> observed
+observed -> out
+accumulate.state -> state
