@@ -1,3 +1,7 @@
 /target
 /frp_export
 /frp_diagram.json
+/expanded_*.svg
+/expanded_*.json
+.DS_Store
+*.swp

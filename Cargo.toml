@@ -2,6 +2,14 @@
 name = "frp-visualizer"
 version = "0.1.0"
 edition = "2021"
+description = "Simulate FRP stream/cell networks from JSON and render SVG diagrams."
+license = "MIT"
+repository = "https://github.com/39sho/frp-visualizer"
+homepage = "https://github.com/39sho/frp-visualizer"
+readme = "README.md"
+authors = ["39sho"]
+keywords = ["frp", "diagram", "svg", "simulation", "visualization"]
+categories = ["command-line-utilities", "visualization"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
