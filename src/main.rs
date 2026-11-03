@@ -444,13 +444,13 @@ fn render_to_dir(mut doc: Document, args: RenderArgs) {
             TimingScopeArg::All => model
                 .component_scopes
                 .iter()
-                .map(|(id, _)| ScopeId::Component(*id))
+                .map(|scope| ScopeId::Component(scope.id))
                 .collect(),
             TimingScopeArg::Component(name) => model
                 .component_scopes
                 .iter()
-                .find(|(_, label)| label == name)
-                .map(|(id, _)| vec![ScopeId::Component(*id)])
+                .find(|scope| scope.label == *name || scope.path == *name)
+                .map(|scope| vec![ScopeId::Component(scope.id)])
                 .unwrap_or_else(|| {
                     eprintln!("component scope not found: {name}");
                     Vec::new()
@@ -462,7 +462,7 @@ fn render_to_dir(mut doc: Document, args: RenderArgs) {
         let Some((svg, _, _)) = render_timing_scope_svg(&doc, &model, &scope, &options) else {
             continue;
         };
-        let mut name = safe_name(&scope.label(&doc));
+        let mut name = safe_name(&model.scope_label(&scope, &doc));
         if !used_names.insert(name.clone()) {
             if let ScopeId::Component(id) = scope {
                 name = format!("{name}_{id}");

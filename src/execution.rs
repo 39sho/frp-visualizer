@@ -7,18 +7,6 @@ pub enum ScopeId {
     Component(NodeId),
 }
 
-impl ScopeId {
-    pub fn label(&self, doc: &Document) -> String {
-        match self {
-            Self::Outer => "outer".into(),
-            Self::Component(id) => doc
-                .node(*id)
-                .map(|node| node.name.clone())
-                .unwrap_or_else(|| format!("component-{id}")),
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct LaneSpec {
     pub label: String,
@@ -29,11 +17,20 @@ pub struct LaneSpec {
 }
 
 #[derive(Clone, Debug)]
+pub struct ScopeInfo {
+    pub id: NodeId,
+    pub label: String,
+    pub path: String,
+    pub parent: Option<NodeId>,
+}
+
+#[derive(Clone, Debug)]
 pub struct ExecutionModel {
     pub sim: Simulation,
     pub flat: FlattenedDocument,
     pub lanes: Vec<LaneSpec>,
-    pub component_scopes: Vec<(NodeId, String)>,
+    pub component_scopes: Vec<ScopeInfo>,
+    pub scope_paths: std::collections::HashMap<NodeId, String>,
 }
 
 impl ExecutionModel {
@@ -65,12 +62,23 @@ impl ExecutionModel {
     pub fn cell(&self, lane: &LaneSpec) -> &[SimStep] {
         self.sim.cell(lane.source)
     }
+
+    pub fn scope_label(&self, scope: &ScopeId, doc: &Document) -> String {
+        match scope {
+            ScopeId::Outer => "outer".into(),
+            ScopeId::Component(id) => self
+                .scope_paths
+                .get(id)
+                .cloned()
+                .or_else(|| doc.node(*id).map(|node| node.name.clone()))
+                .unwrap_or_else(|| format!("component-{id}")),
+        }
+    }
 }
 
 pub fn build_execution_model(doc: &Document) -> ExecutionModel {
     let (sim, flat) = simulate_with_mapping(doc);
     let mut lanes = Vec::new();
-    let mut component_scopes = Vec::new();
 
     for node in &doc.nodes {
         if node.kind.is_event() || node.kind.is_cell() {
@@ -128,27 +136,48 @@ pub fn build_execution_model(doc: &Document) -> ExecutionModel {
         }
     }
 
-    for node in &doc.nodes {
-        let NodeKind::Component {
-            inputs, outputs, ..
-        } = &node.kind
-        else {
-            continue;
-        };
-        component_scopes.push((node.id, node.name.clone()));
-        let scope = ScopeId::Component(node.id);
+    let mut scope_paths = std::collections::HashMap::new();
+    let mut component_scopes: Vec<ScopeInfo> = flat
+        .scope_parents
+        .keys()
+        .copied()
+        .map(|id| {
+            let label = flat
+                .scope_labels
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| format!("component-{id}"));
+            let path = build_scope_path(
+                id,
+                &flat.scope_parents,
+                &flat.scope_labels,
+                &mut scope_paths,
+            );
+            ScopeInfo {
+                id,
+                label,
+                path,
+                parent: flat.scope_parents.get(&id).copied().flatten(),
+            }
+        })
+        .collect();
+    component_scopes.sort_by(|a, b| a.path.cmp(&b.path));
+
+    for scope in &component_scopes {
+        let (inputs, outputs) = flat.scope_ports.get(&scope.id).cloned().unwrap_or_default();
+        let scope_id = ScopeId::Component(scope.id);
         for (index, port) in inputs.iter().enumerate() {
-            if let Some(&(source, _)) = flat.component_inputs.get(&(node.id, index)) {
+            if let Some(&(source, _)) = flat.component_inputs.get(&(scope.id, index)) {
                 lanes.push(LaneSpec {
                     label: format!("in {}", port.name),
                     kind: port.ty,
                     source,
-                    scope: scope.clone(),
-                    position: [-1_000_000.0 + index as f32, node.pos[1]],
+                    scope: scope_id.clone(),
+                    position: [-1_000_000.0 + index as f32, 0.0],
                 });
             }
         }
-        if let Some(internal_ids) = flat.scopes.get(&node.id) {
+        if let Some(internal_ids) = flat.scopes.get(&scope.id) {
             for id in internal_ids {
                 let Some(internal) = flat.doc.node(*id) else {
                     continue;
@@ -165,19 +194,59 @@ pub fn build_execution_model(doc: &Document) -> ExecutionModel {
                     label: short_label(&internal.name),
                     kind,
                     source: *id,
-                    scope: scope.clone(),
+                    scope: scope_id.clone(),
                     position: internal.pos,
                 });
             }
         }
         for (index, port) in outputs.iter().enumerate() {
-            if let Some(&(source, _)) = flat.component_outputs.get(&(node.id, index)) {
+            if let Some(&(source, _)) = flat.component_outputs.get(&(scope.id, index)) {
                 lanes.push(LaneSpec {
                     label: format!("out {}", port.name),
                     kind: port.ty,
                     source,
-                    scope: scope.clone(),
-                    position: [1_000_000.0 + index as f32, node.pos[1]],
+                    scope: scope_id.clone(),
+                    position: [1_000_000.0 + index as f32, 0.0],
+                });
+            }
+        }
+    }
+
+    let mut child_counters: std::collections::HashMap<NodeId, usize> =
+        std::collections::HashMap::new();
+    for scope in &component_scopes {
+        let Some(parent) = scope.parent else {
+            continue;
+        };
+        let child_index = *child_counters.entry(parent).or_insert(0);
+        child_counters.insert(parent, child_index + 1);
+        let (inputs, outputs) = flat.scope_ports.get(&scope.id).cloned().unwrap_or_default();
+        let parent_scope = ScopeId::Component(parent);
+        for (port_index, port) in inputs.iter().enumerate() {
+            if let Some(&(source, _)) = flat.component_inputs.get(&(scope.id, port_index)) {
+                lanes.push(LaneSpec {
+                    label: format!("{}.{}", scope.label, port.name),
+                    kind: port.ty,
+                    source,
+                    scope: parent_scope.clone(),
+                    position: [
+                        -900_000.0 + child_index as f32 * 100.0 + port_index as f32,
+                        0.0,
+                    ],
+                });
+            }
+        }
+        for (port_index, port) in outputs.iter().enumerate() {
+            if let Some(&(source, _)) = flat.component_outputs.get(&(scope.id, port_index)) {
+                lanes.push(LaneSpec {
+                    label: format!("{}.{}", scope.label, port.name),
+                    kind: port.ty,
+                    source,
+                    scope: parent_scope.clone(),
+                    position: [
+                        900_000.0 + child_index as f32 * 100.0 + port_index as f32,
+                        0.0,
+                    ],
                 });
             }
         }
@@ -188,7 +257,33 @@ pub fn build_execution_model(doc: &Document) -> ExecutionModel {
         flat,
         lanes,
         component_scopes,
+        scope_paths,
     }
+}
+
+fn build_scope_path(
+    id: NodeId,
+    parents: &std::collections::HashMap<NodeId, Option<NodeId>>,
+    labels: &std::collections::HashMap<NodeId, String>,
+    cache: &mut std::collections::HashMap<NodeId, String>,
+) -> String {
+    if let Some(path) = cache.get(&id) {
+        return path.clone();
+    }
+    let label = labels
+        .get(&id)
+        .cloned()
+        .unwrap_or_else(|| format!("component-{id}"));
+    let path = match parents.get(&id).copied().flatten() {
+        Some(parent) => format!(
+            "{}/{}",
+            build_scope_path(parent, parents, labels, cache),
+            label
+        ),
+        None => label,
+    };
+    cache.insert(id, path.clone());
+    path
 }
 
 fn has_sink_downstream(doc: &Document, component: NodeId, port: usize) -> bool {
@@ -286,7 +381,7 @@ pub fn trace_json(doc: &Document, model: &ExecutionModel, timing_reliable: bool)
                 PortType::Any => "any",
             };
             let mut value = serde_json::json!({
-                "scope": lane.scope.label(doc),
+                "scope": model.scope_label(&lane.scope, doc),
                 "label": lane.label,
                 "kind": kind,
                 "source": name(lane.source),
@@ -394,6 +489,30 @@ mod tests {
             .as_array()
             .is_some());
         assert!(!value["lanes"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn nested_component_scopes_are_listed_and_rendered() {
+        let dsl = include_str!("../examples/nested.frp");
+        let parsed = crate::dsl::parse(dsl).unwrap();
+        let model = build_execution_model(&parsed.doc);
+        let paths: Vec<&str> = model
+            .component_scopes
+            .iter()
+            .map(|scope| scope.path.as_str())
+            .collect();
+        assert!(paths.contains(&"outer"), "{paths:?}");
+        assert!(paths.contains(&"outer/inner"), "{paths:?}");
+        let inner = model
+            .component_scopes
+            .iter()
+            .find(|scope| scope.path == "outer/inner")
+            .unwrap();
+        let lanes = model.lanes_for_scope(&ScopeId::Component(inner.id));
+        let labels: Vec<&str> = lanes.iter().map(|lane| lane.label.as_str()).collect();
+        assert!(labels.contains(&"in x"), "{labels:?}");
+        assert!(labels.contains(&"out y"), "{labels:?}");
+        assert!(labels.contains(&"m"), "{labels:?}");
     }
 
     #[test]

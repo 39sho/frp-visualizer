@@ -35,6 +35,9 @@ pub struct FlattenedDocument {
     pub component_inputs: HashMap<(NodeId, usize), (NodeId, usize)>,
     pub component_outputs: HashMap<(NodeId, usize), (NodeId, usize)>,
     pub scopes: HashMap<NodeId, Vec<NodeId>>,
+    pub scope_parents: HashMap<NodeId, Option<NodeId>>,
+    pub scope_labels: HashMap<NodeId, String>,
+    pub scope_ports: HashMap<NodeId, (Vec<PortSpec>, Vec<PortSpec>)>,
     pub sinks: HashMap<NodeId, (NodeId, usize)>,
 }
 
@@ -84,6 +87,9 @@ pub fn flatten_document(doc: &Document) -> FlattenedDocument {
         component_inputs_pending: HashMap::new(),
         component_outputs: HashMap::new(),
         scopes: HashMap::new(),
+        scope_parents: HashMap::new(),
+        scope_labels: HashMap::new(),
+        scope_ports: HashMap::new(),
         sinks: HashMap::new(),
     };
     context.expand_all(&mut flat);
@@ -94,6 +100,9 @@ pub fn flatten_document(doc: &Document) -> FlattenedDocument {
         component_inputs: context.component_inputs_pending,
         component_outputs: context.component_outputs,
         scopes: context.scopes,
+        scope_parents: context.scope_parents,
+        scope_labels: context.scope_labels,
+        scope_ports: context.scope_ports,
         sinks: context.sinks,
     }
 }
@@ -128,6 +137,9 @@ struct FlattenContext {
     component_inputs_pending: HashMap<(NodeId, usize), (NodeId, usize)>,
     component_outputs: HashMap<(NodeId, usize), (NodeId, usize)>,
     scopes: HashMap<NodeId, Vec<NodeId>>,
+    scope_parents: HashMap<NodeId, Option<NodeId>>,
+    scope_labels: HashMap<NodeId, String>,
+    scope_ports: HashMap<NodeId, (Vec<PortSpec>, Vec<PortSpec>)>,
     sinks: HashMap<NodeId, (NodeId, usize)>,
 }
 
@@ -231,14 +243,20 @@ impl FlattenContext {
         } else {
             outputs
         };
-        let owner = if self.original_nodes.contains(&component.id) {
-            component.id
+        let parent = if self.original_nodes.contains(&component.id) {
+            None
         } else {
-            self.owner_of
-                .get(&component.id)
-                .copied()
-                .unwrap_or(component.id)
+            self.owner_of.get(&component.id).copied()
         };
+        self.scope_parents.insert(component.id, parent);
+        let scope_label = component
+            .name
+            .rsplit_once('/')
+            .map(|(_, label)| label.to_string())
+            .unwrap_or_else(|| component.name.clone());
+        self.scope_labels.insert(component.id, scope_label);
+        self.scope_ports
+            .insert(component.id, (input_ports.to_vec(), output_ports.to_vec()));
 
         let mut id_map: HashMap<NodeId, NodeId> = HashMap::new();
         for node in &definition.doc.nodes {
@@ -254,8 +272,8 @@ impl FlattenContext {
             let mut cloned = node.clone();
             cloned.id = id_map[&node.id];
             cloned.name = format!("{prefix}/{}", cloned.name);
-            self.owner_of.insert(cloned.id, owner);
-            self.scopes.entry(owner).or_default().push(cloned.id);
+            self.owner_of.insert(cloned.id, component.id);
+            self.scopes.entry(component.id).or_default().push(cloned.id);
             doc.nodes.push(cloned);
         }
         let mut internal_edges = Vec::new();

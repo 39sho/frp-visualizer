@@ -1,0 +1,25 @@
+diagram Nested
+layout auto
+time_end 2
+
+component inner {
+  in x: stream
+  out y: stream
+  map m = identity
+  x -> m
+  m -> y
+}
+
+component outer {
+  in a: stream
+  out b: stream
+  component inner = inner
+  a -> inner.x
+  inner.y -> b
+}
+
+stream s events 1:1
+component outer = outer
+sink out
+s -> outer.a
+outer.b -> out
