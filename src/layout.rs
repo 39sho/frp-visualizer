@@ -1007,6 +1007,19 @@ pub fn auto_layout(doc: &mut Document) {
     }
     let ids: Vec<NodeId> = doc.nodes.iter().map(|n| n.id).collect();
     let index: HashMap<NodeId, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+    let sizes: HashMap<NodeId, [f32; 2]> = doc
+        .nodes
+        .iter()
+        .map(|node| (node.id, node.size()))
+        .collect();
+    let mut neighbors: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+    for edge in &doc.edges {
+        if !index.contains_key(&edge.from) || !index.contains_key(&edge.to) {
+            continue;
+        }
+        neighbors.entry(edge.from).or_default().push(edge.to);
+        neighbors.entry(edge.to).or_default().push(edge.from);
+    }
     let mut adjacency: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
     for edge in &doc.edges {
         if !index.contains_key(&edge.from) || !index.contains_key(&edge.to) {
@@ -1083,12 +1096,30 @@ pub fn auto_layout(doc: &mut Document) {
         groups[layer.get(id).copied().unwrap_or(0)].push(*id);
     }
 
+    // Sinks are terminals. Put them in their own rightmost column so an
+    // incoming wire never has to run backwards around unrelated nodes.
+    let sink_ids: HashSet<NodeId> = doc
+        .nodes
+        .iter()
+        .filter(|node| node.kind.is_sink())
+        .map(|node| node.id)
+        .collect();
+    if !sink_ids.is_empty() {
+        for group in &mut groups {
+            group.retain(|id| !sink_ids.contains(id));
+        }
+        groups.retain(|group| !group.is_empty());
+        let mut sinks: Vec<NodeId> = sink_ids.iter().copied().collect();
+        sinks.sort_by_key(|id| index.get(id).copied().unwrap_or(0));
+        groups.push(sinks);
+    }
+
     let mut y_order: HashMap<NodeId, f32> = doc.nodes.iter().map(|n| (n.id, n.pos[1])).collect();
     for _ in 0..3 {
         for group in groups.iter_mut() {
             group.sort_by(|a, b| {
-                let ay = neighbor_center(*a, doc, &y_order);
-                let by = neighbor_center(*b, doc, &y_order);
+                let ay = neighbor_center(*a, &neighbors, &y_order);
+                let by = neighbor_center(*b, &neighbors, &y_order);
                 ay.partial_cmp(&by)
                     .unwrap_or(std::cmp::Ordering::Equal)
                     .then_with(|| {
@@ -1107,39 +1138,119 @@ pub fn auto_layout(doc: &mut Document) {
         }
     }
 
-    let max_rows = groups.iter().map(Vec::len).max().unwrap_or(1) as f32;
-    let row_step = 130.0;
-    let col_step = 320.0;
-    for (li, group) in groups.iter().enumerate() {
-        let total_h = (group.len().saturating_sub(1)) as f32 * row_step;
-        let block_h = (max_rows - 1.0) * row_step;
-        let start_y = 80.0 + (block_h - total_h) / 2.0;
-        for (row, id) in group.iter().enumerate() {
-            if let Some(node) = doc.node_mut(*id) {
-                node.pos = [80.0 + li as f32 * col_step, start_y + row as f32 * row_step];
+    // Assign vertical coordinates from neighbour barycenters instead of
+    // centering every layer in the tallest column. A sink whose input is at
+    // the bottom should stay at the bottom, not in the middle of the canvas.
+    let row_gap = 42.0;
+    let mut centers: HashMap<NodeId, f32> = HashMap::new();
+    for group in &groups {
+        let mut y = 80.0;
+        for id in group {
+            let height = node_height(&sizes, *id);
+            centers.insert(*id, y + height / 2.0);
+            y += height + row_gap;
+        }
+    }
+    for _ in 0..20 {
+        let previous = centers.clone();
+        for group in &groups {
+            let mut desired: Vec<f32> = group
+                .iter()
+                .map(|id| neighbor_center(*id, &neighbors, &previous))
+                .collect();
+            enforce_spacing(&sizes, group, &mut desired, row_gap);
+            for (id, center) in group.iter().zip(desired) {
+                centers.insert(*id, center);
             }
+        }
+    }
+
+    let min_top = doc
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            centers.get(&node.id).map(|center| {
+                center - sizes.get(&node.id).map(|size| size[1]).unwrap_or(74.0) / 2.0
+            })
+        })
+        .fold(f32::INFINITY, f32::min);
+    let y_shift = if min_top.is_finite() {
+        80.0 - min_top
+    } else {
+        0.0
+    };
+
+    let column_gap = 160.0;
+    let mut layer_x = Vec::with_capacity(groups.len());
+    let mut x = 80.0;
+    for group in &groups {
+        layer_x.push(x);
+        let width = group
+            .iter()
+            .filter_map(|id| sizes.get(id).map(|size| size[0]))
+            .fold(0.0f32, f32::max);
+        x += width + column_gap;
+    }
+    for (li, group) in groups.iter().enumerate() {
+        for id in group {
+            let Some(node) = doc.node_mut(*id) else {
+                continue;
+            };
+            let height = sizes.get(id).map(|size| size[1]).unwrap_or(74.0);
+            let center = centers.get(id).copied().unwrap_or(80.0) + y_shift;
+            node.pos = [layer_x[li], center - height / 2.0];
         }
     }
 }
 
-fn neighbor_center(id: NodeId, doc: &Document, y_order: &HashMap<NodeId, f32>) -> f32 {
-    let mut values = Vec::new();
-    for edge in &doc.edges {
-        if edge.to == id {
-            if let Some(y) = y_order.get(&edge.from) {
-                values.push(*y);
-            }
-        }
-        if edge.from == id {
-            if let Some(y) = y_order.get(&edge.to) {
-                values.push(*y);
-            }
+fn node_height(sizes: &HashMap<NodeId, [f32; 2]>, id: NodeId) -> f32 {
+    sizes.get(&id).map(|size| size[1]).unwrap_or(74.0)
+}
+
+fn enforce_spacing(
+    sizes: &HashMap<NodeId, [f32; 2]>,
+    group: &[NodeId],
+    centers: &mut [f32],
+    gap: f32,
+) {
+    for index in 1..group.len() {
+        let min_gap =
+            (node_height(sizes, group[index - 1]) + node_height(sizes, group[index])) / 2.0 + gap;
+        centers[index] = centers[index].max(centers[index - 1] + min_gap);
+    }
+    for index in (0..group.len().saturating_sub(1)).rev() {
+        let min_gap =
+            (node_height(sizes, group[index]) + node_height(sizes, group[index + 1])) / 2.0 + gap;
+        centers[index] = centers[index].min(centers[index + 1] - min_gap);
+    }
+    for index in 1..group.len() {
+        let min_gap =
+            (node_height(sizes, group[index - 1]) + node_height(sizes, group[index])) / 2.0 + gap;
+        centers[index] = centers[index].max(centers[index - 1] + min_gap);
+    }
+}
+
+fn neighbor_center(
+    id: NodeId,
+    neighbors: &HashMap<NodeId, Vec<NodeId>>,
+    y_order: &HashMap<NodeId, f32>,
+) -> f32 {
+    let fallback = y_order.get(&id).copied().unwrap_or(0.0);
+    let Some(near) = neighbors.get(&id) else {
+        return fallback;
+    };
+    let mut sum = 0.0;
+    let mut count = 0.0;
+    for other in near {
+        if let Some(y) = y_order.get(other) {
+            sum += *y;
+            count += 1.0;
         }
     }
-    if values.is_empty() {
-        y_order.get(&id).copied().unwrap_or(0.0)
+    if count == 0.0 {
+        fallback
     } else {
-        values.iter().sum::<f32>() / values.len() as f32
+        sum / count
     }
 }
 
@@ -1396,6 +1507,57 @@ mod tests {
         assert!(output_a[1] < output_b[1]);
         assert_eq!(input_a[0], rect.x);
         assert_eq!(output_a[0], rect.right());
+    }
+
+    #[test]
+    fn sinks_stay_downstream_and_follow_their_input() {
+        let mut lines = vec![
+            "diagram Large".to_string(),
+            "layout auto".to_string(),
+            "time_end 2".to_string(),
+            String::new(),
+        ];
+        for index in 0..20 {
+            lines.push(format!("stream s{index} events 1:1"));
+            lines.push(format!("map m{index} = identity"));
+        }
+        lines.push("map final = identity".into());
+        lines.push("sink out".into());
+        lines.push(String::new());
+        for index in 0..20 {
+            lines.push(format!("s{index} -> m{index}"));
+        }
+        lines.push("m0 -> final".into());
+        lines.push("final -> out".into());
+        let parsed = crate::dsl::parse(&lines.join("\n")).unwrap();
+        let doc = parsed.doc;
+        let source = doc.nodes.iter().find(|node| node.name == "m0").unwrap();
+        let final_node = doc.nodes.iter().find(|node| node.name == "final").unwrap();
+        let out = doc.nodes.iter().find(|node| node.name == "out").unwrap();
+        assert!(final_node.pos[0] > source.pos[0]);
+        assert!(out.pos[0] > final_node.pos[0]);
+        let source_center = source.pos[1] + source.size()[1] / 2.0;
+        let out_center = out.pos[1] + out.size()[1] / 2.0;
+        assert!(
+            (source_center - out_center).abs() < 60.0,
+            "source_center={source_center}, out_center={out_center}"
+        );
+        let network = layout(&doc);
+        for (from, to) in [(source.id, final_node.id), (final_node.id, out.id)] {
+            let edge = doc
+                .edges
+                .iter()
+                .find(|edge| edge.from == from && edge.to == to)
+                .unwrap();
+            let route = network.edge_routes.get(&edge.id).unwrap();
+            for pair in route.points.windows(2) {
+                assert!(
+                    pair[1][0] + 0.5 >= pair[0][0],
+                    "wire goes backwards: {:?}",
+                    route.points
+                );
+            }
+        }
     }
 
     #[test]

@@ -206,7 +206,7 @@ frp-visualizer render examples/calibration.frp out
 frp-visualizer render examples/structural.frp structural-out --output network
 ```
 
-- `layout auto` / `layout manual`、ノードごとの `at x,y` に対応
+- `layout auto` / `layout manual`、ノードごとの `at x,y` に対応。auto layout は Sink を最右列に置き、入力側の重心に合わせて配置するため、大きな図でも `out` への配線が戻りにくい
 - `stream` / `cell` / `map` / `filter` / `merge` / `snapshot` / `hold` / `lift` / `never` / `sink`
 - `component <name> { ... }` で Component を定義し、`component <instance> = <definition>` で配置
 - ポートは `merged.left`、`total.event`、`component.port` のように指定
