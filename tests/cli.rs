@@ -111,6 +111,87 @@ fn check_and_render_a_valid_example() {
 }
 
 #[test]
+fn modular_component_project_compiles_and_renders() {
+    let dir = temp_dir("modular");
+    let json_path = dir.join("compiled.json");
+    let output = bin()
+        .args(["check", "examples/modular/main.frp", "--strict"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = bin()
+        .arg("compile")
+        .arg("examples/modular/main.frp")
+        .arg(&json_path)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let compiled: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&json_path).unwrap()).unwrap();
+    let component_names: Vec<&str> = compiled["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|component| component["name"].as_str().unwrap())
+        .collect();
+    assert!(component_names.contains(&"accumulator"));
+    assert!(component_names.contains(&"pipeline"));
+
+    let output = bin()
+        .arg("render")
+        .arg("examples/modular/main.frp")
+        .arg(&dir)
+        .args(["--timing-scope", "all", "--expand-all"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for name in [
+        "network.svg",
+        "timing.svg",
+        "diagram.svg",
+        "diagram.json",
+        "trace.json",
+        "timing_pipeline.svg",
+        "timing_pipeline_acc.svg",
+        "expanded_accumulator.svg",
+        "expanded_pipeline.svg",
+    ] {
+        assert!(dir.join(name).exists(), "missing {name}");
+    }
+    let trace: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("trace.json")).unwrap()).unwrap();
+    assert_eq!(trace["values_reliable"], true);
+
+    let from_json = dir.join("from_json");
+    let output = bin()
+        .arg("render")
+        .arg(&json_path)
+        .arg(&from_json)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(from_json.join("network.svg").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn invalid_document_is_not_rendered() {
     let dir = temp_dir("invalid");
     let out = dir.join("out");

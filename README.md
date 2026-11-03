@@ -18,6 +18,7 @@ FRP（Functional Reactive Programming）の **Stream / Cell ネットワーク�
 - モジュールを避けるルーティング、平行線の分離、交差部のホップ
 - Cell を帯で示すタイミング図、トランザクション開始／終了ティック
 - **Component 雲**（入出力ポート・多出力・内部ネットワークの展開表示・内部状態を含むシミュレーション）
+- **複数ファイル分割**（`import` でコンポーネント定義を読み込み、より大きな Component を組み立て）
 - Sink / Component 出力の lane 化と、Component 内部スコープの timing 生成
 - 値を出さない **event-only timing**（`--timing-values none`）
 - focus した Transaction の **active サブグラフを timing 内に表示**
@@ -74,6 +75,9 @@ frp-visualizer render-example calibration out --focus-transaction 2
 # Component の内部ネットワークも出力
 frp-visualizer render-example component out --expand accumulate
 frp-visualizer render-example component out --expand-all
+
+# 複数ファイルに分割した Component 定義を読み込んで出力
+frp-visualizer render examples/modular/main.frp out
 
 # 全体＋内部スコープの timing を生成
 frp-visualizer render examples/component.frp out --timing-scope all
@@ -135,6 +139,7 @@ frp-visualizer render-example <name> [out_dir] [options]
 | `calibration` | クリア・スケーリング付き累積器 |
 | `component` | Component 雲と多出力、内部状態 |
 | `annotation` | 注釈吹き出し |
+| [`modular/main.frp`](examples/modular/main.frp) | import で分割した Component 定義の組み立て |
 
 ### Components
 
@@ -145,6 +150,61 @@ frp-visualizer render-example <name> [out_dir] [options]
 `--expand` で内部ネットワークを単体表示できます。
 
 ![Expanded component](docs/examples/expanded-accumulate.svg)
+
+### Modular component files
+
+コンポーネント定義はファイル単位で分割できます。小さな部品を import して、より大きな Component を組み立てられます。
+
+`components/accumulator.frp`:
+
+```text
+component accumulator {
+  in delta: stream
+  out total: stream
+  out state: cell
+
+  snapshot snap = add
+  hold accum = 0
+  delta -> snap.event
+  accum -> snap.cell
+  snap -> accum
+  snap -> total
+  accum -> state
+}
+```
+
+`components/pipeline.frp`:
+
+```text
+import "accumulator.frp"
+
+component pipeline {
+  in delta: stream
+  out total: stream
+  out state: cell
+  component acc = accumulator
+  delta -> acc.delta
+  acc.total -> total
+  acc.state -> state
+}
+```
+
+`main.frp`:
+
+```text
+import "components/pipeline.frp"
+stream sDelta events 1:5, 2:10
+component pipeline = pipeline
+map observed = identity
+sink out
+sDelta -> pipeline.delta
+pipeline.total -> observed
+observed -> out
+```
+
+import は再帰的に解決され、同じファイルが複数回読み込まれても定義は一度だけ登録されます。循環 import、欠落ファイル、定義名の重複はエラーになります。`compile` で書き出した JSON には import 済みの Component 定義がすべて埋め込まれるため、JSON 単体で render できます。
+
+完全な例: [`examples/modular/main.frp`](examples/modular/main.frp)
 
 ### Annotations
 
@@ -209,6 +269,9 @@ frp-visualizer render examples/structural.frp structural-out --output network
 - `layout auto` / `layout manual`、ノードごとの `at x,y` に対応。auto layout は Sink を最右列に置き、入力側の重心に合わせて配置するため、大きな図でも `out` への配線が戻りにくい
 - `stream` / `cell` / `map` / `filter` / `merge` / `snapshot` / `hold` / `lift` / `never` / `sink`
 - `component <name> { ... }` で Component を定義し、`component <instance> = <definition>` で配置
+- `import "path/to/component.frp"` で別ファイルの Component 定義を読み込み、現在のファイルから参照可能にする
+- `import` はファイル先頭（コメント・空行を除く）に置く。パスはそのファイルからの相対パス
+- import されるファイルは `import` と `component` 定義だけを含める。定義名はプロジェクト全体で一意
 - ポートは `merged.left`、`total.event`、`component.port` のように指定
 - `note "..." on <node>` / `note "..." on tx <N>` で注釈
 - `mode structural` で構造スケッチ用のモードに切り替え
@@ -220,7 +283,7 @@ frp-visualizer render examples/structural.frp structural-out --output network
 
 ![Structural mode](docs/examples/structural.svg)
 
-完全な例は [`examples/calibration.frp`](examples/calibration.frp)、[`examples/component.frp`](examples/component.frp)、[`examples/annotation.frp`](examples/annotation.frp)、[`examples/structural.frp`](examples/structural.frp)、[`examples/nested.frp`](examples/nested.frp) にあります。
+完全な例は [`examples/calibration.frp`](examples/calibration.frp)、[`examples/component.frp`](examples/component.frp)、[`examples/annotation.frp`](examples/annotation.frp)、[`examples/structural.frp`](examples/structural.frp)、[`examples/nested.frp`](examples/nested.frp)、[`examples/modular/main.frp`](examples/modular/main.frp) にあります。
 
 ## JSON format
 
@@ -228,7 +291,7 @@ JSON はコンパイル済みの IR です。`frp-visualizer example accumulator
 
 - `nodes`: `id` / `kind` / `name` / `pos` / `label`
 - `edges`: `from` / `from_port` / `to` / `to_port` / `label` / `label_width`
-- `components`: `name` / `inputs` / `outputs` / `body` / `doc`
+- `components`: `name` / `inputs` / `outputs` / `body` / `doc`（import された定義も含む）
 - `annotations`: `text` / `target` / `position`
 - `nodes[].display_only`: 実行意味論を持たない表示専用ノード
 - `mode`: `executable`（デフォルト）または `structural`

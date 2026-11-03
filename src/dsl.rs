@@ -3,6 +3,8 @@ use crate::model::{
     Annotation, AnnotationTarget, CombineOp, ComponentDef, Document, FilterOp, NodeId, NodeKind,
     PortSpec, PortType, TimedValue, UnaryOp, Value,
 };
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct ParsedDsl {
@@ -10,14 +12,31 @@ pub struct ParsedDsl {
     pub auto_layout: bool,
 }
 
-pub fn parse_file(path: &std::path::Path) -> Result<ParsedDsl, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-    parse(&text)
+#[derive(Clone, Debug)]
+struct ImportDirective {
+    line: usize,
+    raw: String,
+    path: PathBuf,
+}
+
+pub fn parse_file(path: &Path) -> Result<ParsedDsl, String> {
+    Loader::new().parse_root(path)
 }
 
 pub fn parse(input: &str) -> Result<ParsedDsl, String> {
-    let mut parser = Parser::new(input);
+    let (imports, body) = strip_leading_imports(input)?;
+    if !imports.is_empty() {
+        return Err("imports require a source file; use parse_file instead".into());
+    }
+    parse_text(&body, Vec::new(), false)
+}
+
+fn parse_text(
+    input: &str,
+    definitions: Vec<ComponentDef>,
+    imported_only: bool,
+) -> Result<ParsedDsl, String> {
+    let mut parser = Parser::new(input, definitions, imported_only);
     let mut doc = Document::blank();
     parser.parse_top(&mut doc)?;
     doc.components = parser.definitions;
@@ -30,15 +49,203 @@ pub fn parse(input: &str) -> Result<ParsedDsl, String> {
     })
 }
 
+fn strip_leading_imports(input: &str) -> Result<(Vec<ImportDirective>, String), String> {
+    let mut imports = Vec::new();
+    let mut body = String::with_capacity(input.len());
+    let mut leading = true;
+    for (index, raw) in input.lines().enumerate() {
+        let line = raw.trim();
+        if leading {
+            if line.is_empty() || line.starts_with('#') {
+                body.push_str(raw);
+                body.push('\n');
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix("import ") {
+                let (path, tail) = take_quoted(rest.trim())
+                    .map_err(|error| format!("line {}: {error}", index + 1))?;
+                if !tail.trim().is_empty() {
+                    return Err(format!(
+                        "line {}: unexpected text after import path",
+                        index + 1
+                    ));
+                }
+                if path.trim().is_empty() {
+                    return Err(format!("line {}: import path is empty", index + 1));
+                }
+                imports.push(ImportDirective {
+                    line: index + 1,
+                    raw: path.clone(),
+                    path: PathBuf::from(path),
+                });
+                body.push('\n');
+                continue;
+            }
+            leading = false;
+        }
+        body.push_str(raw);
+        body.push('\n');
+    }
+    Ok((imports, body))
+}
+
+fn merge_definitions(target: &mut Vec<ComponentDef>, incoming: Vec<ComponentDef>) {
+    for definition in incoming {
+        if !target
+            .iter()
+            .any(|existing| existing.name == definition.name)
+        {
+            target.push(definition);
+        }
+    }
+}
+
+fn resolve_import(importer: &Path, imported: &Path) -> PathBuf {
+    if imported.is_absolute() {
+        imported.to_path_buf()
+    } else {
+        importer
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(imported)
+    }
+}
+
+fn canonical_file(path: &Path) -> Result<PathBuf, String> {
+    std::fs::canonicalize(path)
+        .map_err(|error| format!("failed to resolve {}: {error}", path.display()))
+}
+
+fn read_source(path: &Path) -> Result<String, String> {
+    std::fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))
+}
+
+struct Loader {
+    cache: HashMap<PathBuf, Vec<ComponentDef>>,
+    stack: Vec<PathBuf>,
+    origins: HashMap<String, PathBuf>,
+}
+
+impl Loader {
+    fn new() -> Self {
+        Self {
+            cache: HashMap::new(),
+            stack: Vec::new(),
+            origins: HashMap::new(),
+        }
+    }
+
+    fn parse_root(&mut self, path: &Path) -> Result<ParsedDsl, String> {
+        let canonical = canonical_file(path)?;
+        self.stack.push(canonical.clone());
+        let result = self.parse_root_inner(&canonical);
+        self.stack.pop();
+        result
+    }
+
+    fn parse_root_inner(&mut self, path: &Path) -> Result<ParsedDsl, String> {
+        let text = read_source(path)?;
+        let (imports, body) = strip_leading_imports(&text)?;
+        let mut definitions = Vec::new();
+        for import in imports {
+            let imported = self.load_import(&import, path)?;
+            merge_definitions(&mut definitions, imported);
+        }
+        parse_text(&body, definitions, false)
+    }
+
+    fn load_import(
+        &mut self,
+        import: &ImportDirective,
+        importer: &Path,
+    ) -> Result<Vec<ComponentDef>, String> {
+        let resolved = resolve_import(importer, &import.path);
+        self.load_file(&resolved).map_err(|error| {
+            format!(
+                "line {}: failed to import \"{}\": {error}",
+                import.line, import.raw
+            )
+        })
+    }
+
+    fn load_file(&mut self, path: &Path) -> Result<Vec<ComponentDef>, String> {
+        let canonical = canonical_file(path)?;
+        if let Some(cached) = self.cache.get(&canonical) {
+            return Ok(cached.clone());
+        }
+        if let Some(index) = self
+            .stack
+            .iter()
+            .position(|candidate| candidate == &canonical)
+        {
+            let mut cycle: Vec<String> = self.stack[index..]
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect();
+            cycle.push(canonical.display().to_string());
+            return Err(format!("cyclic import: {}", cycle.join(" -> ")));
+        }
+        self.stack.push(canonical.clone());
+        let result = self.load_file_inner(&canonical);
+        self.stack.pop();
+        result
+    }
+
+    fn load_file_inner(&mut self, path: &Path) -> Result<Vec<ComponentDef>, String> {
+        let text = read_source(path)?;
+        let (imports, body) =
+            strip_leading_imports(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+        let mut imported_definitions = Vec::new();
+        for import in imports {
+            let imported = self.load_import(&import, path)?;
+            merge_definitions(&mut imported_definitions, imported);
+        }
+        let parsed = parse_text(&body, imported_definitions.clone(), true)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let imported_names: HashSet<&str> = imported_definitions
+            .iter()
+            .map(|definition| definition.name.as_str())
+            .collect();
+        let own_definitions: Vec<ComponentDef> = parsed
+            .doc
+            .components
+            .iter()
+            .filter(|definition| !imported_names.contains(definition.name.as_str()))
+            .cloned()
+            .collect();
+        for definition in &own_definitions {
+            if let Some(existing) = self.origins.get(&definition.name) {
+                if existing.as_path() != path {
+                    return Err(format!(
+                        "duplicate component definition '{}' in {} (already defined in {})",
+                        definition.name,
+                        path.display(),
+                        existing.display()
+                    ));
+                }
+            } else {
+                self.origins
+                    .insert(definition.name.clone(), path.to_path_buf());
+            }
+        }
+        let mut definitions = imported_definitions;
+        merge_definitions(&mut definitions, own_definitions);
+        self.cache.insert(path.to_path_buf(), definitions.clone());
+        Ok(definitions)
+    }
+}
+
 struct Parser {
     lines: Vec<(usize, String)>,
     index: usize,
     definitions: Vec<ComponentDef>,
     auto_layout: bool,
+    imported_only: bool,
 }
 
 impl Parser {
-    fn new(input: &str) -> Self {
+    fn new(input: &str, definitions: Vec<ComponentDef>, imported_only: bool) -> Self {
         let lines = input
             .lines()
             .enumerate()
@@ -48,8 +255,9 @@ impl Parser {
         Self {
             lines,
             index: 0,
-            definitions: Vec::new(),
+            definitions,
             auto_layout: false,
+            imported_only,
         }
     }
 
@@ -65,6 +273,10 @@ impl Parser {
         while let Some((line_number, line)) = self.next_line() {
             if line.starts_with("component ") && line.ends_with('{') {
                 self.parse_component_definition(line_number, &line)?;
+            } else if self.imported_only {
+                return Err(format!(
+                    "imported component file may only contain imports and component definitions (found '{line}')"
+                ));
             } else {
                 self.parse_statement(doc, line_number, &line)?;
             }
@@ -88,6 +300,9 @@ impl Parser {
         _line_number: usize,
         line: &str,
     ) -> Result<(), String> {
+        if line.starts_with("import ") {
+            return Err("imports must appear at the top of the file".into());
+        }
         if let Some(rest) = line.strip_prefix("note ") {
             return self.parse_note(doc, rest);
         }
@@ -746,6 +961,25 @@ mod tests {
     use super::*;
     use crate::render_svgs;
     use crate::sim::simulate;
+    use std::path::PathBuf;
+
+    fn temp_project(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "frp_visualizer_dsl_{}_{}",
+            std::process::id(),
+            name
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_file(path: &Path, text: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, text).unwrap();
+    }
 
     fn stream_values(doc: &Document, name: &str) -> Vec<String> {
         let id = doc.nodes.iter().find(|node| node.name == name).unwrap().id;
@@ -874,6 +1108,144 @@ mod tests {
 
         let error = parse("sink s\nmerge merged\ns -> merged\n").unwrap_err();
         assert!(error.contains("no output"));
+    }
+
+    #[test]
+    fn parses_modular_component_files() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/modular/main.frp");
+        let parsed = parse_file(&path).unwrap();
+        let names: Vec<&str> = parsed
+            .doc
+            .components
+            .iter()
+            .map(|definition| definition.name.as_str())
+            .collect();
+        assert_eq!(
+            names.iter().filter(|name| **name == "accumulator").count(),
+            1
+        );
+        assert!(names.contains(&"pipeline"));
+
+        let pipeline = crate::find_component(&parsed.doc, "pipeline").unwrap();
+        let instance = pipeline
+            .doc
+            .nodes
+            .iter()
+            .find(|node| node.name == "acc")
+            .unwrap();
+        assert!(matches!(
+            &instance.kind,
+            NodeKind::Component {
+                definition: Some(name),
+                ..
+            } if name == "accumulator"
+        ));
+
+        let bundle = render_svgs(&parsed.doc);
+        assert!(bundle.network.contains(">pipeline</text>"));
+        let expanded = crate::render_component_network(
+            &parsed.doc,
+            "pipeline",
+            &crate::RenderOptions::default(),
+        )
+        .unwrap();
+        assert!(expanded.contains(">acc</text>"));
+        assert!(expanded.contains("snapshot · hold"));
+    }
+
+    #[test]
+    fn imports_are_relative_and_shared_dependencies_are_loaded_once() {
+        let dir = temp_project("diamond");
+        write_file(
+            &dir.join("shared/base.frp"),
+            "component identity {\n  in x: stream\n  out y: stream\n  map m = identity\n  x -> m\n  m -> y\n}\n",
+        );
+        write_file(
+            &dir.join("parts/a.frp"),
+            "import \"../shared/base.frp\"\ncomponent a {\n  in x: stream\n  out y: stream\n  component id = identity\n  x -> id.x\n  id.y -> y\n}\n",
+        );
+        write_file(
+            &dir.join("parts/b.frp"),
+            "import \"../shared/base.frp\"\ncomponent b {\n  in x: stream\n  out y: stream\n  component id = identity\n  x -> id.x\n  id.y -> y\n}\n",
+        );
+        write_file(
+            &dir.join("main.frp"),
+            "import \"parts/a.frp\"\nimport \"parts/b.frp\"\ncomponent top {\n  in x: stream\n  out y: stream\n  component first = a\n  component second = b\n  x -> first.x\n  first.y -> second.x\n  second.y -> y\n}\nstream s events 1:1\ncomponent top = top\ns -> top.x\nmap observed = identity\ntop.y -> observed\nsink out\nobserved -> out\n",
+        );
+
+        let parsed = parse_file(&dir.join("main.frp")).unwrap();
+        let names: Vec<&str> = parsed
+            .doc
+            .components
+            .iter()
+            .map(|definition| definition.name.as_str())
+            .collect();
+        assert_eq!(names.iter().filter(|name| **name == "identity").count(), 1);
+        assert!(names.contains(&"a"));
+        assert!(names.contains(&"b"));
+        assert!(names.contains(&"top"));
+        assert!(render_svgs(&parsed.doc).network.starts_with("<svg"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reports_import_failures_with_context() {
+        let dir = temp_project("missing");
+        write_file(&dir.join("main.frp"), "import \"missing.frp\"\n");
+        let error = parse_file(&dir.join("main.frp")).unwrap_err();
+        assert!(
+            error.contains("failed to import \"missing.frp\""),
+            "{error}"
+        );
+        assert!(error.contains("missing.frp"), "{error}");
+
+        write_file(&dir.join("literal.frp"), "stream s events 1:1\n");
+        write_file(&dir.join("bad_main.frp"), "import \"literal.frp\"\n");
+        let error = parse_file(&dir.join("bad_main.frp")).unwrap_err();
+        assert!(
+            error.contains(
+                "imported component file may only contain imports and component definitions"
+            ),
+            "{error}"
+        );
+
+        let error = parse("diagram X\nimport \"literal.frp\"\n").unwrap_err();
+        assert!(error.contains("imports must appear at the top"), "{error}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rejects_cyclic_and_duplicate_imports() {
+        let dir = temp_project("cycles");
+        write_file(
+            &dir.join("a.frp"),
+            "import \"b.frp\"\ncomponent a {\n  in x: stream\n  out y: stream\n  x -> y\n}\n",
+        );
+        write_file(
+            &dir.join("b.frp"),
+            "import \"a.frp\"\ncomponent b {\n  in x: stream\n  out y: stream\n  x -> y\n}\n",
+        );
+        let error = parse_file(&dir.join("a.frp")).unwrap_err();
+        assert!(error.contains("cyclic import"), "{error}");
+
+        write_file(
+            &dir.join("dup_a.frp"),
+            "component duplicated {\n  in x: stream\n  out y: stream\n  x -> y\n}\n",
+        );
+        write_file(
+            &dir.join("dup_b.frp"),
+            "component duplicated {\n  in x: stream\n  out y: stream\n  x -> y\n}\n",
+        );
+        write_file(
+            &dir.join("dup_main.frp"),
+            "import \"dup_a.frp\"\nimport \"dup_b.frp\"\n",
+        );
+        let error = parse_file(&dir.join("dup_main.frp")).unwrap_err();
+        assert!(
+            error.contains("duplicate component definition 'duplicated'"),
+            "{error}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

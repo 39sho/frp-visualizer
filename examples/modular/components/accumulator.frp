@@ -1,0 +1,16 @@
+# A component definition file. It contains no executable top-level network.
+component accumulator {
+  in delta: stream
+  out total: stream
+  out state: cell
+  body "snapshot · hold"
+
+  snapshot snap = add
+  hold accum = 0
+
+  delta -> snap.event
+  accum -> snap.cell
+  snap -> accum
+  snap -> total
+  accum -> state
+}

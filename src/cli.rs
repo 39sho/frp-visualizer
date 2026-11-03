@@ -559,6 +559,9 @@ Render options:
   --timing-network focus|none
   --output all|network
 
+DSL imports:
+  import "path/to/component.frp"  load component definitions relative to the file
+
 default route: orthogonal (use --route hybrid for diagonal wires)
 "#
     );

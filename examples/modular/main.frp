@@ -1,0 +1,17 @@
+# Main network. Component definitions live in components/ and are imported here.
+import "components/pipeline.frp"
+
+diagram Modular components
+time_end 5
+layout auto
+
+stream sDelta events 1:5, 2:10, 4:-3
+component pipeline = pipeline
+map observed = identity
+sink out
+sink state
+
+sDelta -> pipeline.delta
+pipeline.total -> observed
+observed -> out
+pipeline.state -> state
