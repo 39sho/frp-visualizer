@@ -1,4 +1,4 @@
-use crate::model::{Document, NodeId, NodeKind, Rect};
+use crate::model::{text_width, Document, NodeId, NodeKind, Rect};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
@@ -64,7 +64,7 @@ pub fn layout_with(doc: &Document, options: &LayoutOptions) -> NetworkLayout {
         let start = output_port_pos(from, from_rect, edge.from_port);
         let end = input_port_pos(to, to_rect, edge.to_port);
         let end_dir = input_port_dir(to, edge.to_port);
-        let obstacles = route_obstacles(&node_rects, edge.from, edge.to);
+        let obstacles = route_obstacles(doc, &node_rects, edge.from, edge.to);
         let points = if options.route_style == RouteStyle::Orthogonal {
             route_edge_orthogonal(&obstacles, &routed, start, [1.0, 0.0], end, end_dir)
                 .unwrap_or_else(|| route_edge(&obstacles, &routed, start, [1.0, 0.0], end, end_dir))
@@ -110,25 +110,51 @@ const EDGE_CLEARANCE: f32 = 12.0;
 const SHARED_RADIUS: f32 = 22.0;
 
 fn route_obstacles(
+    doc: &Document,
     node_rects: &HashMap<NodeId, Rect>,
     start_node: NodeId,
     end_node: NodeId,
 ) -> Vec<Rect> {
-    node_rects
-        .iter()
-        .map(|(id, rect)| {
-            if *id == start_node || *id == end_node {
-                rect.expand(ROUTE_CLEARANCE)
-            } else {
-                Rect::new(
-                    rect.x - ROUTE_CLEARANCE,
-                    rect.y - ROUTE_CLEARANCE - LABEL_CLEARANCE,
-                    rect.w + ROUTE_CLEARANCE * 2.0,
-                    rect.h + ROUTE_CLEARANCE * 2.0 + LABEL_CLEARANCE,
-                )
+    let mut obstacles = Vec::new();
+    for (id, rect) in node_rects {
+        if *id == start_node || *id == end_node {
+            obstacles.push(rect.expand(ROUTE_CLEARANCE));
+            if let Some(label) = doc.node(*id).and_then(|node| node_label_rect(node, *rect)) {
+                obstacles.push(label.expand(2.0));
             }
-        })
-        .collect()
+        } else {
+            obstacles.push(Rect::new(
+                rect.x - ROUTE_CLEARANCE,
+                rect.y - ROUTE_CLEARANCE - LABEL_CLEARANCE,
+                rect.w + ROUTE_CLEARANCE * 2.0,
+                rect.h + ROUTE_CLEARANCE * 2.0 + LABEL_CLEARANCE,
+            ));
+        }
+    }
+    obstacles
+}
+
+fn node_label_rect(node: &crate::model::Node, rect: Rect) -> Option<Rect> {
+    let (text, center_x) = match &node.kind {
+        NodeKind::Hold { .. } => {
+            let width = text_width("hold", 13.5);
+            ("hold", rect.x + 12.0 + width / 2.0)
+        }
+        NodeKind::Map { .. }
+        | NodeKind::Filter { .. }
+        | NodeKind::Merge
+        | NodeKind::Snapshot { .. }
+        | NodeKind::Lift { .. }
+        | NodeKind::Never => (node.kind.primitive(), rect.center()[0]),
+        _ => return None,
+    };
+    let width = text_width(text, 13.5);
+    Some(Rect::new(
+        center_x - width / 2.0,
+        rect.y - 24.0,
+        width,
+        18.0,
+    ))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1646,6 +1672,41 @@ mod tests {
             );
         }
         assert_eq!(crossing_count(&network), 0);
+    }
+
+    fn assert_routes_avoid_labels(doc: &Document, network: &NetworkLayout, key: &str) {
+        for node in &doc.nodes {
+            let Some(rect) = network.node_rects.get(&node.id).copied() else {
+                continue;
+            };
+            let Some(label) = node_label_rect(node, rect) else {
+                continue;
+            };
+            let label = label.expand(1.0);
+            for (edge_id, route) in &network.edge_routes {
+                for pair in route.points.windows(2) {
+                    assert!(
+                        !segment_hits_rect(pair[0], pair[1], &label),
+                        "{key}: edge {edge_id} crosses label on node {}",
+                        node.name
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn auto_layout_keeps_routes_off_node_labels() {
+        for (_, key) in examples::EXAMPLES {
+            let mut doc = examples::load_example(key).unwrap();
+            auto_layout(&mut doc);
+            let network = layout(&doc);
+            assert_routes_avoid_labels(&doc, &network, key);
+        }
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/modular/main.frp");
+        let doc = crate::dsl::parse_file(&path).unwrap().doc;
+        let network = layout(&doc);
+        assert_routes_avoid_labels(&doc, &network, "modular");
     }
 
     #[test]

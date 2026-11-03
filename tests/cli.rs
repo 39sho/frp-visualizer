@@ -175,6 +175,20 @@ fn modular_component_project_compiles_and_renders() {
         serde_json::from_str(&std::fs::read_to_string(dir.join("trace.json")).unwrap()).unwrap();
     assert_eq!(trace["values_reliable"], true);
 
+    for name in ["expanded_pipeline.json", "expanded_accumulator.json"] {
+        let output = bin()
+            .arg("check")
+            .arg(dir.join(name))
+            .arg("--strict")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     let from_json = dir.join("from_json");
     let output = bin()
         .arg("render")

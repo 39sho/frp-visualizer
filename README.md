@@ -15,7 +15,7 @@ FRP（Functional Reactive Programming）の **Stream / Cell ネットワーク�
 - Stream と Cell の型付きポート、離散トランザクションによるシミュレーション
 - `network.svg` / `timing.svg` / `diagram.svg` / `diagram.json` の出力
 - **orthogonal 配線**（デフォルト）と `--route hybrid` の斜め配線
-- ノードとラベルを避けるルーティング、交差ペナルティ、平行線の分離、交差部のホップ
+- ノードとラベルを避けるルーティング、直交配線の交差ペナルティ、平行線の分離、交差部のホップ
 - **port-aware auto layout**（直列ノードを入出力ポートの高さに揃え、Sink も入力元に追従）
 - Cell を帯で示すタイミング図、トランザクション開始／終了ティック
 - **Component 雲**（入出力ポート・多出力・内部ネットワークの展開表示・内部状態を含むシミュレーション）
@@ -141,6 +141,8 @@ frp-visualizer render-example <name> [out_dir] [options]
 | `component` | Component 雲と多出力、内部状態 |
 | `annotation` | 注釈吹き出し |
 | [`modular/main.frp`](examples/modular/main.frp) | import で分割した Component 定義の組み立て |
+
+`modular/main.frp` はファイル実行例です（`render-example` の組み込み一覧には含まれません）。
 
 ### Components
 

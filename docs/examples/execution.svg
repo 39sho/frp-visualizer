@@ -22,7 +22,7 @@
 <path d="M409.52,329.10 L413.57,338.10 L405.47,338.10 Z" fill="#4a799e"/>
 <path d="M484.52,292.10 L498.52,292.10 L498.52,251.70 L630.52,251.70 L644.52,251.70" fill="none" stroke="#181818" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M644.52,251.70 L635.52,255.75 L635.52,247.65 Z" fill="#181818"/>
-<path d="M794.52,234.10 L808.52,234.10 L808.52,183.10 L1029.52,183.10 L1029.52,197.10" fill="none" stroke="#181818" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M794.52,234.10 L808.52,234.10 L808.52,171.10 L998.76,171.10 L998.76,183.10 L1029.52,183.10 L1029.52,197.10" fill="none" stroke="#181818" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M1029.52,197.10 L1025.47,188.10 L1033.57,188.10 Z" fill="#181818"/>
 <path d="M1104.52,234.10 L1118.52,234.10 L1118.52,221.10 L1131.52,221.10 L1131.52,223.30 L1250.52,223.30 L1264.52,223.30" fill="none" stroke="#4a799e" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="6.00 3.00"/>
 <path d="M1264.52,223.30 L1255.52,227.35 L1255.52,219.25 Z" fill="#4a799e"/>
@@ -233,7 +233,7 @@
 <path d="M443.18,1182.02 L444.79,1185.61 L441.56,1185.61 Z" fill="#4a799e"/>
 <path d="M473.08,1167.27 L478.66,1167.27 L481.45,1167.27 L481.45,1180.11 L531.30,1180.11 L531.30,1199.32 L536.88,1199.32" fill="none" stroke="#181818" stroke-width="0.62" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M536.88,1199.32 L533.29,1200.94 L533.29,1197.71 Z" fill="#181818"/>
-<path d="M596.69,1192.31 L602.27,1192.31 L602.27,1171.97 L690.39,1171.97 L690.39,1177.55" fill="none" stroke="#181818" stroke-width="0.62" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M596.69,1192.31 L602.27,1192.31 L602.27,1165.59 L601.51,1165.44 L600.86,1165.01 L600.43,1164.36 L600.28,1163.60 L600.43,1162.83 L600.86,1162.19 L601.51,1161.76 L602.27,1161.60 L602.27,1158.41 L678.12,1158.41 L678.12,1161.60 L678.89,1161.76 L679.53,1162.19 L679.97,1162.83 L680.12,1163.60 L679.97,1164.36 L679.53,1165.01 L678.89,1165.44 L678.12,1165.59 L678.12,1171.97 L690.39,1171.97 L690.39,1177.55" fill="none" stroke="#181818" stroke-width="0.62" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M690.39,1177.55 L688.77,1173.96 L692.00,1173.96 Z" fill="#181818"/>
 <path d="M720.29,1192.31 L725.88,1192.31 L725.88,1197.49 L731.06,1197.49 L731.06,1180.78 L778.51,1180.78 L784.09,1180.78" fill="none" stroke="#4a799e" stroke-width="0.62" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2.39 1.20"/>
 <path d="M784.09,1180.78 L780.50,1182.40 L780.50,1179.17 Z" fill="#4a799e"/>
@@ -264,18 +264,18 @@
 <text x="788.08" y="1180.78" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="3.79" fill="#696969" text-anchor="start" dominant-baseline="central">a</text>
 <text x="788.08" y="1192.59" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="3.79" fill="#696969" text-anchor="start" dominant-baseline="central">b</text>
 <text x="909.29" y="1186.68" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="5.38" fill="#181818" text-anchor="start" dominant-baseline="central">out</text>
-<rect x="657.48" y="1174.55" width="65.81" height="35.51" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.30"/>
-<text x="690.39" y="1216.06" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.50" fill="#2d6cdf" text-anchor="middle" dominant-baseline="central">update</text>
-<text x="662.48" y="1175.55" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#1</text>
+<rect x="286.66" y="1146.96" width="31.26" height="15.57" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.30"/>
+<text x="291.66" y="1147.96" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#1</text>
+<rect x="781.09" y="1168.93" width="65.81" height="35.51" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.30"/>
+<text x="786.09" y="1169.93" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
 <rect x="410.27" y="1149.51" width="65.81" height="35.51" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.20" stroke-dasharray="3.00 3.00"/>
 <text x="479.08" y="1167.27" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.50" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">snap!</text>
 <text x="415.27" y="1150.51" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
 <rect x="533.88" y="1171.76" width="65.81" height="41.09" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.30"/>
 <text x="538.88" y="1172.76" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#3</text>
-<rect x="286.66" y="1146.96" width="31.26" height="15.57" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.30"/>
-<text x="291.66" y="1147.96" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#1</text>
-<rect x="781.09" y="1168.93" width="65.81" height="35.51" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.30"/>
-<text x="786.09" y="1169.93" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
+<rect x="657.48" y="1174.55" width="65.81" height="35.51" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.30"/>
+<text x="690.39" y="1216.06" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.50" fill="#2d6cdf" text-anchor="middle" dominant-baseline="central">update</text>
+<text x="662.48" y="1175.55" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#1</text>
 <line x1="558.00" y1="1098.10" x2="558.00" y2="1110.10" stroke="#b0b0b0" stroke-width="1.00" stroke-linecap="round" stroke-dasharray="3.00 4.00"/>
 </g>
 </svg>
