@@ -21,9 +21,11 @@ pub struct TransactionTrace {
     pub index: usize,
     pub time: f64,
     pub events: HashMap<NodeId, Value>,
+    pub event_order: Vec<NodeId>,
     pub cell_before: HashMap<NodeId, Value>,
     pub cell_after: HashMap<NodeId, Value>,
     pub updates: HashMap<NodeId, Value>,
+    pub update_order: Vec<NodeId>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -598,6 +600,7 @@ fn simulate_flat(doc: &Document) -> Simulation {
         let key = (t * 1_000_000.0).round() as u64;
         let cell_before = cell_values.clone();
         let mut event_values: HashMap<NodeId, Value> = HashMap::new();
+        let mut fired_order: Vec<NodeId> = Vec::new();
 
         for &id in &event_order {
             let node = match doc.node(id) {
@@ -646,6 +649,7 @@ fn simulate_flat(doc: &Document) -> Simulation {
             };
             if let Some(value) = value {
                 event_values.insert(id, value);
+                fired_order.push(id);
             }
         }
 
@@ -659,6 +663,7 @@ fn simulate_flat(doc: &Document) -> Simulation {
         }
 
         let mut updated: HashMap<NodeId, Value> = HashMap::new();
+        let mut update_order: Vec<NodeId> = Vec::new();
         for &id in &cell_order {
             let node = match doc.node(id) {
                 Some(n) => n,
@@ -680,6 +685,7 @@ fn simulate_flat(doc: &Document) -> Simulation {
                 let old = cell_values.get(&id).cloned().unwrap_or(Value::Unit);
                 if value != old {
                     updated.insert(id, value);
+                    update_order.push(id);
                 }
             }
         }
@@ -696,9 +702,11 @@ fn simulate_flat(doc: &Document) -> Simulation {
             index: sim.traces.len(),
             time: t,
             events: event_values.clone(),
+            event_order: fired_order,
             cell_before,
             cell_after: cell_values.clone(),
             updates: updated.clone(),
+            update_order,
         });
     }
 

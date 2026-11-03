@@ -261,6 +261,8 @@ pub fn trace_json(doc: &Document, model: &ExecutionModel, timing_reliable: bool)
                 .iter()
                 .map(|(id, value)| (name(*id), serde_json::json!(value.to_string())))
                 .collect();
+            let event_order: Vec<String> = trace.event_order.iter().map(|id| name(*id)).collect();
+            let update_order: Vec<String> = trace.update_order.iter().map(|id| name(*id)).collect();
             serde_json::json!({
                 "index": trace.index,
                 "time": trace.time,
@@ -268,6 +270,8 @@ pub fn trace_json(doc: &Document, model: &ExecutionModel, timing_reliable: bool)
                 "updates": updates,
                 "cell_before": cell_before,
                 "cell_after": cell_after,
+                "event_order": event_order,
+                "update_order": update_order,
             })
         })
         .collect();
@@ -381,6 +385,14 @@ mod tests {
         assert_eq!(value["timing_reliable"], true);
         assert_eq!(value["values_reliable"], true);
         assert!(value["transactions"].as_array().unwrap().len() >= 3);
+        assert!(value["transactions"][0]["event_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item == "sDelta"));
+        assert!(value["transactions"][0]["update_order"]
+            .as_array()
+            .is_some());
         assert!(!value["lanes"].as_array().unwrap().is_empty());
     }
 

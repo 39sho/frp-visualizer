@@ -309,6 +309,20 @@ pub fn render_timing(
                     TextAnchor::Center,
                 );
             }
+            let order = trace
+                .event_order
+                .iter()
+                .position(|node| *node == id)
+                .or_else(|| trace.update_order.iter().position(|node| *node == id));
+            if let Some(index) = order {
+                scene.text(
+                    [scaled.x + 2.0, scaled.y - 2.0],
+                    format!("#{}", index + 1),
+                    8.0,
+                    ACCENT,
+                    TextAnchor::Start,
+                );
+            }
         }
 
         if let Some(&focus_x) = tx_xs.get(trace.index) {
