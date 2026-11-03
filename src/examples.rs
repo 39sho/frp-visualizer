@@ -38,11 +38,10 @@ fn label(doc: &mut Document, from: NodeId, to: NodeId, port: usize, text: &str) 
     }
 }
 
-fn add(doc: &mut Document, kind: NodeKind, name: &str, note: &str, pos: [f32; 2]) -> NodeId {
+fn add(doc: &mut Document, kind: NodeKind, name: &str, _note: &str, pos: [f32; 2]) -> NodeId {
     let id = doc.add_node(kind, pos);
     if let Some(node) = doc.node_mut(id) {
         node.name = name.to_string();
-        node.note = note.to_string();
     }
     id
 }

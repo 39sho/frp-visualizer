@@ -545,8 +545,6 @@ pub struct Node {
     pub kind: NodeKind,
     pub name: String,
     #[serde(default)]
-    pub note: String,
-    #[serde(default)]
     pub label: String,
     #[serde(default, skip_serializing_if = "is_false")]
     pub display_only: bool,
@@ -560,7 +558,6 @@ impl Node {
             id,
             kind,
             name,
-            note: String::new(),
             label: String::new(),
             display_only: false,
             pos,
