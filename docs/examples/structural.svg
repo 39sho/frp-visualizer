@@ -12,15 +12,15 @@
 <text x="206.80" y="88.00" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="10.50" fill="#696969" text-anchor="start" dominant-baseline="central">stream wire</text>
 <line x1="285.48" y1="88.00" x2="307.48" y2="88.00" stroke="#4a799e" stroke-width="1.55" stroke-linecap="round" stroke-dasharray="6.00 3.00"/>
 <text x="313.48" y="88.00" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="10.50" fill="#696969" text-anchor="start" dominant-baseline="central">cell wire</text>
-<path d="M91.36,151.10 L105.36,151.10 L105.36,176.10 L334.00,176.10 L348.00,176.10" fill="none" stroke="#181818" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M348.00,176.10 L339.00,180.15 L339.00,172.05 Z" fill="#181818"/>
-<path d="M562.64,176.10 L576.64,176.10 L576.64,151.10 L654.00,151.10 L668.00,151.10" fill="none" stroke="#181818" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M668.00,151.10 L659.00,155.15 L659.00,147.05 Z" fill="#181818"/>
-<text x="87.36" y="151.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="13.50" fill="#181818" text-anchor="end" dominant-baseline="central">sInput</text>
-<path d="M348.00,139.10 L540.44,139.10 L562.64,176.10 L540.44,213.10 L348.00,213.10 Z" fill="#f9f6b0" stroke="#181818" stroke-width="1.60" stroke-linejoin="round"/>
-<text x="455.32" y="126.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="13.50" fill="#181818" text-anchor="middle" dominant-baseline="central">map</text>
-<text x="459.32" y="176.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="14.00" fill="#181818" text-anchor="middle" dominant-baseline="central">SetReferenceMapPoints</text>
-<text x="672.00" y="151.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="13.50" fill="#181818" text-anchor="start" dominant-baseline="central">out</text>
+<path d="M91.36,176.10 L105.36,176.10 L237.36,176.10 L251.36,176.10" fill="none" stroke="#181818" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M251.36,176.10 L242.36,180.15 L242.36,172.05 Z" fill="#181818"/>
+<path d="M466.00,176.10 L480.00,176.10 L612.00,176.10 L626.00,176.10" fill="none" stroke="#181818" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M626.00,176.10 L617.00,180.15 L617.00,172.05 Z" fill="#181818"/>
+<text x="87.36" y="176.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="13.50" fill="#181818" text-anchor="end" dominant-baseline="central">sInput</text>
+<path d="M251.36,139.10 L443.80,139.10 L466.00,176.10 L443.80,213.10 L251.36,213.10 Z" fill="#f9f6b0" stroke="#181818" stroke-width="1.60" stroke-linejoin="round"/>
+<text x="358.68" y="126.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="13.50" fill="#181818" text-anchor="middle" dominant-baseline="central">map</text>
+<text x="362.68" y="176.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="14.00" fill="#181818" text-anchor="middle" dominant-baseline="central">SetReferenceMapPoints</text>
+<text x="630.00" y="176.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="13.50" fill="#181818" text-anchor="start" dominant-baseline="central">out</text>
 <text x="24.00" y="243.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="10.50" fill="#696969" text-anchor="start" dominant-baseline="central">TIMING</text>
 <text x="44.00" y="275.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="10.50" fill="#696969" text-anchor="start" dominant-baseline="central">transactions</text>
 <text x="44.00" y="290.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="9.50" fill="#b0b0b0" text-anchor="start" dominant-baseline="central">Tn start · cells update at Tn end</text>

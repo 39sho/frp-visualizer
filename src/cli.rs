@@ -522,7 +522,9 @@ fn render_to_dir(mut doc: Document, args: RenderArgs) {
         }
         if let Some(definition) = find_component(&doc, &name) {
             let json_path = dir.join(format!("expanded_{}.json", safe_name(&name)));
-            match save_document(&definition.doc, &json_path) {
+            let mut expanded_doc = definition.doc.clone();
+            expanded_doc.components = doc.components.clone();
+            match save_document(&expanded_doc, &json_path) {
                 Ok(()) => println!("wrote {}", json_path.display()),
                 Err(err) => eprintln!("failed to write {}: {err}", json_path.display()),
             }
@@ -558,6 +560,9 @@ Render options:
   --timing-values values|none
   --timing-network focus|none
   --output all|network
+
+DSL imports:
+  import "path/to/component.frp"  load component definitions relative to the file
 
 default route: orthogonal (use --route hybrid for diagonal wires)
 "#

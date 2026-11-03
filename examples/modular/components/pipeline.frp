@@ -1,0 +1,14 @@
+# A larger component assembled from an imported component definition.
+import "accumulator.frp"
+
+component pipeline {
+  in delta: stream
+  out total: stream
+  out state: cell
+  body "imported accumulator"
+
+  component acc = accumulator
+  delta -> acc.delta
+  acc.total -> total
+  acc.state -> state
+}

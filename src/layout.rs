@@ -1,4 +1,4 @@
-use crate::model::{Document, NodeId, NodeKind, Rect};
+use crate::model::{text_width, Document, NodeId, NodeKind, Rect};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
@@ -64,13 +64,12 @@ pub fn layout_with(doc: &Document, options: &LayoutOptions) -> NetworkLayout {
         let start = output_port_pos(from, from_rect, edge.from_port);
         let end = input_port_pos(to, to_rect, edge.to_port);
         let end_dir = input_port_dir(to, edge.to_port);
+        let obstacles = route_obstacles(doc, &node_rects, edge.from, edge.to);
         let points = if options.route_style == RouteStyle::Orthogonal {
-            route_edge_orthogonal(&node_rects, &routed, start, [1.0, 0.0], end, end_dir)
-                .unwrap_or_else(|| {
-                    route_edge(&node_rects, &routed, start, [1.0, 0.0], end, end_dir)
-                })
+            route_edge_orthogonal(&obstacles, &routed, start, [1.0, 0.0], end, end_dir)
+                .unwrap_or_else(|| route_edge(&obstacles, &routed, start, [1.0, 0.0], end, end_dir))
         } else {
-            route_edge(&node_rects, &routed, start, [1.0, 0.0], end, end_dir)
+            route_edge(&obstacles, &routed, start, [1.0, 0.0], end, end_dir)
         };
         let label_pos = route_label_pos(&points);
         routed.push(points.clone());
@@ -106,8 +105,57 @@ fn input_port_dir(node: &crate::model::Node, port: usize) -> [f32; 2] {
 }
 
 const ROUTE_CLEARANCE: f32 = 8.0;
+const LABEL_CLEARANCE: f32 = 20.0;
 const EDGE_CLEARANCE: f32 = 12.0;
 const SHARED_RADIUS: f32 = 22.0;
+
+fn route_obstacles(
+    doc: &Document,
+    node_rects: &HashMap<NodeId, Rect>,
+    start_node: NodeId,
+    end_node: NodeId,
+) -> Vec<Rect> {
+    let mut obstacles = Vec::new();
+    for (id, rect) in node_rects {
+        if *id == start_node || *id == end_node {
+            obstacles.push(rect.expand(ROUTE_CLEARANCE));
+            if let Some(label) = doc.node(*id).and_then(|node| node_label_rect(node, *rect)) {
+                obstacles.push(label.expand(2.0));
+            }
+        } else {
+            obstacles.push(Rect::new(
+                rect.x - ROUTE_CLEARANCE,
+                rect.y - ROUTE_CLEARANCE - LABEL_CLEARANCE,
+                rect.w + ROUTE_CLEARANCE * 2.0,
+                rect.h + ROUTE_CLEARANCE * 2.0 + LABEL_CLEARANCE,
+            ));
+        }
+    }
+    obstacles
+}
+
+fn node_label_rect(node: &crate::model::Node, rect: Rect) -> Option<Rect> {
+    let (text, center_x) = match &node.kind {
+        NodeKind::Hold { .. } => {
+            let width = text_width("hold", 13.5);
+            ("hold", rect.x + 12.0 + width / 2.0)
+        }
+        NodeKind::Map { .. }
+        | NodeKind::Filter { .. }
+        | NodeKind::Merge
+        | NodeKind::Snapshot { .. }
+        | NodeKind::Lift { .. }
+        | NodeKind::Never => (node.kind.primitive(), rect.center()[0]),
+        _ => return None,
+    };
+    let width = text_width(text, 13.5);
+    Some(Rect::new(
+        center_x - width / 2.0,
+        rect.y - 24.0,
+        width,
+        18.0,
+    ))
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EdgeAvoidance {
@@ -117,17 +165,13 @@ enum EdgeAvoidance {
 }
 
 fn route_edge(
-    node_rects: &HashMap<NodeId, Rect>,
+    obstacles: &[Rect],
     existing: &[Vec<[f32; 2]>],
     start: [f32; 2],
     start_dir: [f32; 2],
     end: [f32; 2],
     end_dir: [f32; 2],
 ) -> Vec<[f32; 2]> {
-    let obstacles: Vec<Rect> = node_rects
-        .values()
-        .map(|rect| rect.expand(ROUTE_CLEARANCE))
-        .collect();
     let distance = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
     if distance < 2.0 * (ROUTE_CLEARANCE + 2.0) {
         return vec![start, end];
@@ -142,7 +186,7 @@ fn route_edge(
     let middle = route_between(
         start_stub,
         end_stub,
-        &obstacles,
+        obstacles,
         existing,
         start,
         end,
@@ -152,7 +196,7 @@ fn route_edge(
         route_between(
             start_stub,
             end_stub,
-            &obstacles,
+            obstacles,
             existing,
             start,
             end,
@@ -163,7 +207,7 @@ fn route_edge(
         route_between(
             start_stub,
             end_stub,
-            &obstacles,
+            obstacles,
             existing,
             start,
             end,
@@ -181,17 +225,13 @@ fn route_edge(
 }
 
 fn route_edge_orthogonal(
-    node_rects: &HashMap<NodeId, Rect>,
+    obstacles: &[Rect],
     existing: &[Vec<[f32; 2]>],
     start: [f32; 2],
     start_dir: [f32; 2],
     end: [f32; 2],
     end_dir: [f32; 2],
 ) -> Option<Vec<[f32; 2]>> {
-    let obstacles: Vec<Rect> = node_rects
-        .values()
-        .map(|rect| rect.expand(ROUTE_CLEARANCE))
-        .collect();
     let distance = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
     if distance < 2.0 * (ROUTE_CLEARANCE + 2.0) {
         return Some(vec![start, end]);
@@ -205,7 +245,7 @@ fn route_edge_orthogonal(
     let middle = orthogonal_route(
         start_stub,
         end_stub,
-        &obstacles,
+        obstacles,
         existing,
         start,
         end,
@@ -215,7 +255,7 @@ fn route_edge_orthogonal(
         orthogonal_route(
             start_stub,
             end_stub,
-            &obstacles,
+            obstacles,
             existing,
             start,
             end,
@@ -226,7 +266,7 @@ fn route_edge_orthogonal(
         orthogonal_route(
             start_stub,
             end_stub,
-            &obstacles,
+            obstacles,
             existing,
             start,
             end,
@@ -475,6 +515,7 @@ fn orthogonal_route(
 }
 
 const BEND_PENALTY: f32 = 30.0;
+const CROSSING_PENALTY: f32 = 240.0;
 
 fn orthogonal_penalty(
     a: [f32; 2],
@@ -488,15 +529,44 @@ fn orthogonal_penalty(
     if !segment_clear(a, b, obstacles) {
         return None;
     }
+    let mut penalty = 0.0;
     if parallel_conflict(a, b, existing, edge_start, edge_end) {
         match avoidance {
-            EdgeAvoidance::Hard => None,
-            EdgeAvoidance::Soft => Some(600.0),
-            EdgeAvoidance::Off => Some(0.0),
+            EdgeAvoidance::Hard => return None,
+            EdgeAvoidance::Soft => penalty += 600.0,
+            EdgeAvoidance::Off => {}
         }
-    } else {
-        Some(0.0)
     }
+    // Crossings are legal but expensive, so the router only accepts one when
+    // the alternative would be a much longer detour.
+    if avoidance != EdgeAvoidance::Off {
+        penalty += crossing_penalty(a, b, existing, edge_start, edge_end);
+    }
+    Some(penalty)
+}
+
+fn crossing_penalty(
+    a: [f32; 2],
+    b: [f32; 2],
+    existing: &[Vec<[f32; 2]>],
+    edge_start: [f32; 2],
+    edge_end: [f32; 2],
+) -> f32 {
+    let mut crossings = 0.0;
+    for route in existing {
+        for window in route.windows(2) {
+            let Some((c, d)) = trim_segment(window[0], window[1], edge_start, SHARED_RADIUS) else {
+                continue;
+            };
+            let Some((c, d)) = trim_segment(c, d, edge_end, SHARED_RADIUS) else {
+                continue;
+            };
+            if segment_crossing(a, b, c, d).is_some() {
+                crossings += CROSSING_PENALTY;
+            }
+        }
+    }
+    crossings
 }
 
 fn relax(
@@ -559,7 +629,12 @@ fn simplify_orthogonal(
             let a = path[index];
             let c = path[index + 2];
             let axis_aligned = (a[0] - c[0]).abs() < 0.1 || (a[1] - c[1]).abs() < 0.1;
-            if axis_aligned && segment_ok(a, c, obstacles, existing, edge_start, edge_end, check) {
+            let crossing_ok = avoidance == EdgeAvoidance::Off
+                || crossing_penalty(a, c, existing, edge_start, edge_end) == 0.0;
+            if axis_aligned
+                && crossing_ok
+                && segment_ok(a, c, obstacles, existing, edge_start, edge_end, check)
+            {
                 path.remove(index + 1);
                 changed = true;
             } else {
@@ -1020,6 +1095,16 @@ pub fn auto_layout(doc: &mut Document) {
         neighbors.entry(edge.from).or_default().push(edge.to);
         neighbors.entry(edge.to).or_default().push(edge.from);
     }
+    let mut incoming: HashMap<NodeId, Vec<(NodeId, usize)>> = HashMap::new();
+    for edge in &doc.edges {
+        if !index.contains_key(&edge.from) || !index.contains_key(&edge.to) {
+            continue;
+        }
+        incoming
+            .entry(edge.to)
+            .or_default()
+            .push((edge.from, edge.from_port));
+    }
     let mut adjacency: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
     for edge in &doc.edges {
         if !index.contains_key(&edge.from) || !index.contains_key(&edge.to) {
@@ -1138,28 +1223,55 @@ pub fn auto_layout(doc: &mut Document) {
         }
     }
 
-    // Assign vertical coordinates from neighbour barycenters instead of
-    // centering every layer in the tallest column. A sink whose input is at
-    // the bottom should stay at the bottom, not in the middle of the canvas.
+    // Align each node with its incoming port anchors instead of centering
+    // every layer in the tallest column. This keeps straight chains straight;
+    // sinks in particular follow the source output port that feeds them.
     let row_gap = 42.0;
+    let sink_row_gap = 24.0;
+    let group_gap = |group: &[NodeId]| {
+        if group.iter().all(|id| sink_ids.contains(id)) {
+            sink_row_gap
+        } else {
+            row_gap
+        }
+    };
     let mut centers: HashMap<NodeId, f32> = HashMap::new();
     for group in &groups {
+        let gap = group_gap(group);
         let mut y = 80.0;
         for id in group {
             let height = node_height(&sizes, *id);
             centers.insert(*id, y + height / 2.0);
-            y += height + row_gap;
+            y += height + gap;
         }
     }
     for _ in 0..20 {
-        let previous = centers.clone();
-        for group in &groups {
-            let mut desired: Vec<f32> = group
+        for group in &mut groups {
+            let mut desired: Vec<(NodeId, f32)> = group
                 .iter()
-                .map(|id| neighbor_center(*id, &neighbors, &previous))
+                .map(|id| {
+                    (
+                        *id,
+                        desired_center_y(*id, doc, &sizes, &centers, &incoming, &neighbors),
+                    )
+                })
                 .collect();
-            enforce_spacing(&sizes, group, &mut desired, row_gap);
-            for (id, center) in group.iter().zip(desired) {
+            desired.sort_by(|(a_id, a), (b_id, b)| {
+                a.partial_cmp(b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| {
+                        index
+                            .get(a_id)
+                            .copied()
+                            .unwrap_or(0)
+                            .cmp(&index.get(b_id).copied().unwrap_or(0))
+                    })
+            });
+            *group = desired.iter().map(|(id, _)| *id).collect();
+            let mut centers_in_group: Vec<f32> =
+                desired.into_iter().map(|(_, center)| center).collect();
+            enforce_spacing(&sizes, group, &mut centers_in_group, group_gap(group));
+            for (id, center) in group.iter().zip(centers_in_group) {
                 centers.insert(*id, center);
             }
         }
@@ -1201,6 +1313,53 @@ pub fn auto_layout(doc: &mut Document) {
             node.pos = [layer_x[li], center - height / 2.0];
         }
     }
+}
+
+/// Barycenter in the coordinate system of incoming ports rather than node
+/// centers. Nodes without incoming edges fall back to neighbour centering.
+fn desired_center_y(
+    id: NodeId,
+    doc: &Document,
+    sizes: &HashMap<NodeId, [f32; 2]>,
+    centers: &HashMap<NodeId, f32>,
+    incoming: &HashMap<NodeId, Vec<(NodeId, usize)>>,
+    neighbors: &HashMap<NodeId, Vec<NodeId>>,
+) -> f32 {
+    if let Some(sources) = incoming.get(&id) {
+        let mut sum = 0.0;
+        let mut count = 0.0;
+        for (source, port) in sources {
+            if let Some(y) = source_port_y(*source, *port, doc, sizes, centers) {
+                sum += y;
+                count += 1.0;
+            }
+        }
+        if count > 0.0 {
+            return sum / count;
+        }
+    }
+    neighbor_center(id, neighbors, centers)
+}
+
+fn source_port_y(
+    id: NodeId,
+    port: usize,
+    doc: &Document,
+    sizes: &HashMap<NodeId, [f32; 2]>,
+    centers: &HashMap<NodeId, f32>,
+) -> Option<f32> {
+    let size = sizes.get(&id)?;
+    let center = centers.get(&id)?;
+    let count = doc.node(id)?.kind.output_types().len();
+    if count == 0 {
+        return None;
+    }
+    let t = if count <= 1 {
+        0.5
+    } else {
+        0.25 + 0.5 * port.min(count - 1) as f32 / (count - 1) as f32
+    };
+    Some(center - size[1] / 2.0 + size[1] * t)
 }
 
 fn node_height(sizes: &HashMap<NodeId, [f32; 2]>, id: NodeId) -> f32 {
@@ -1404,6 +1563,7 @@ pub fn edge_direction(route: &EdgeRoute) -> [f32; 2] {
 mod tests {
     use super::*;
     use crate::examples;
+    use std::path::Path;
 
     fn trimmed_segments(points: &[[f32; 2]]) -> Vec<([f32; 2], [f32; 2])> {
         let (Some(start), Some(end)) = (points.first().copied(), points.last().copied()) else {
@@ -1462,6 +1622,103 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    fn crossing_count(network: &NetworkLayout) -> usize {
+        let mut routes: Vec<_> = network.edge_routes.values().collect();
+        routes.sort_by_key(|route| route.points.first().map(|point| point[0] as i64));
+        let mut count = 0;
+        for i in 0..routes.len() {
+            for j in i + 1..routes.len() {
+                for a in routes[i].points.windows(2) {
+                    for b in routes[j].points.windows(2) {
+                        if segment_crossing(a[0], a[1], b[0], b[1]).is_some() {
+                            count += 1;
+                        }
+                    }
+                }
+            }
+        }
+        count
+    }
+
+    #[test]
+    fn auto_layout_aligns_single_input_chains_and_sinks() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/modular/main.frp");
+        let doc = crate::dsl::parse_file(&path).unwrap().doc;
+        let network = layout(&doc);
+        for (from, to) in [
+            ("sDelta", "pipeline"),
+            ("pipeline", "observed"),
+            ("observed", "out"),
+            ("pipeline", "state"),
+        ] {
+            let from_id = doc.nodes.iter().find(|node| node.name == from).unwrap().id;
+            let to_id = doc.nodes.iter().find(|node| node.name == to).unwrap().id;
+            let edge = doc
+                .edges
+                .iter()
+                .find(|edge| edge.from == from_id && edge.to == to_id)
+                .unwrap();
+            let route = network.edge_routes.get(&edge.id).unwrap();
+            assert!(
+                route
+                    .points
+                    .windows(2)
+                    .all(|pair| (pair[0][1] - pair[1][1]).abs() < 0.5),
+                "{from} -> {to} should be horizontal: {:?}",
+                route.points
+            );
+        }
+        assert_eq!(crossing_count(&network), 0);
+    }
+
+    fn assert_routes_avoid_labels(doc: &Document, network: &NetworkLayout, key: &str) {
+        for node in &doc.nodes {
+            let Some(rect) = network.node_rects.get(&node.id).copied() else {
+                continue;
+            };
+            let Some(label) = node_label_rect(node, rect) else {
+                continue;
+            };
+            let label = label.expand(1.0);
+            for (edge_id, route) in &network.edge_routes {
+                for pair in route.points.windows(2) {
+                    assert!(
+                        !segment_hits_rect(pair[0], pair[1], &label),
+                        "{key}: edge {edge_id} crosses label on node {}",
+                        node.name
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn auto_layout_keeps_routes_off_node_labels() {
+        for (_, key) in examples::EXAMPLES {
+            let mut doc = examples::load_example(key).unwrap();
+            auto_layout(&mut doc);
+            let network = layout(&doc);
+            assert_routes_avoid_labels(&doc, &network, key);
+        }
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/modular/main.frp");
+        let doc = crate::dsl::parse_file(&path).unwrap().doc;
+        let network = layout(&doc);
+        assert_routes_avoid_labels(&doc, &network, "modular");
+    }
+
+    #[test]
+    fn auto_example_routes_do_not_cross() {
+        for (_, key) in examples::EXAMPLES {
+            let mut doc = examples::load_example(key).unwrap();
+            auto_layout(&mut doc);
+            assert_eq!(
+                crossing_count(&layout(&doc)),
+                0,
+                "{key} has crossing routes after auto layout"
+            );
         }
     }
 
