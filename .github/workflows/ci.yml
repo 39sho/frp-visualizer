@@ -27,3 +27,6 @@ jobs:
       - run: test -f /tmp/frp-visualizer-check/timing_accumulate.svg
       - run: test -f /tmp/frp-visualizer-check/expanded_accumulate.svg
       - run: jq -e '.timing_reliable == true and .values_reliable == true' /tmp/frp-visualizer-check/trace.json
+      - run: ./target/release/frp-visualizer check examples/nested.frp --strict
+      - run: ./target/release/frp-visualizer render examples/nested.frp /tmp/frp-visualizer-nested --timing-scope all
+      - run: test -f /tmp/frp-visualizer-nested/timing_outer_inner.svg

@@ -100,7 +100,7 @@ frp-visualizer render-example <name> [out_dir] [options]
 | `--route hybrid` | 斜め配線を許可 |
 | `--focus-transaction N` | N 番目（1 始まり）のトランザクションを実行フォーカス |
 | `--expand <component>` | 指定 Component の内部ネットワークを `expanded_<name>.svg` / `.json` に出力 |
-| `--timing-scope outer|all|component:<name>` | タイミング図のスコープ。`all` で全体＋各 Component 内部を出力 |
+| `--timing-scope outer|all|component:<name-or-path>` | タイミング図のスコープ。`all` で全体＋全 Component 内部（nested 含む）を出力 |
 | `--timing-values values|none` | イベント値を表示するか。`none` は時刻のみ |
 | `--timing-network focus|none` | focus 時に active サブグラフを表示するか |
 | `--expand-all` | すべての Component 内部ネットワークを出力 |
@@ -137,7 +137,7 @@ frp-visualizer render-example <name> [out_dir] [options]
 
 ### Timing scopes
 
-タイミング図は flatten 済みの実行 trace から生成されます。`--timing-scope all` で全体に加えて各 Component の内部 timing を `timing_<component>.svg` に出力します。
+タイミング図は flatten 済みの実行 trace から生成されます。`--timing-scope all` で全体に加えて各 Component の内部 timing を `timing_<component>.svg` に出力します。nested Component は `outer/inner` のようなパスで区別され、`--timing-scope component:outer/inner` で個別に指定できます。
 
 ```sh
 frp-visualizer render examples/component.frp out --timing-scope all --timing-values none
@@ -203,7 +203,7 @@ frp-visualizer render examples/structural.frp structural-out --output network
 
 ![Structural mode](docs/examples/structural.svg)
 
-完全な例は [`examples/calibration.frp`](examples/calibration.frp)、[`examples/component.frp`](examples/component.frp)、[`examples/annotation.frp`](examples/annotation.frp)、[`examples/structural.frp`](examples/structural.frp) にあります。
+完全な例は [`examples/calibration.frp`](examples/calibration.frp)、[`examples/component.frp`](examples/component.frp)、[`examples/annotation.frp`](examples/annotation.frp)、[`examples/structural.frp`](examples/structural.frp)、[`examples/nested.frp`](examples/nested.frp) にあります。
 
 ## JSON format
 
