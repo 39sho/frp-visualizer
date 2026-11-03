@@ -3,7 +3,9 @@
 [![CI](https://github.com/39sho/frp-visualizer/actions/workflows/ci.yml/badge.svg)](https://github.com/39sho/frp-visualizer/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-FRP（Functional Reactive Programming）の **Stream / Cell ネットワークを JSON で定義し、離散トランザクションでシミュレーションして SVG に出力する CLI ツール**です。ネットワーク図とタイミング図を同時に生成します。
+FRP（Functional Reactive Programming）の **Stream / Cell ネットワークをテキストで定義し、同じ定義からネットワーク図とイベント伝搬タイミングを生成する CLI ツール**です。
+
+コアが保証するのは **配線・トポロジー・イベントの発火時刻/回数** です。値計算・C++ の副作用・実時間は、必要に応じて実行バックエンドに委ねる設計です。
 
 ![Calibration](docs/examples/calibration.svg)
 
@@ -47,6 +49,9 @@ cargo install --path . --locked
 ## Quick start
 
 ```sh
+# スターター DSL を作成
+frp-visualizer init sample.frp
+
 # 組み込み example の一覧
 frp-visualizer list
 
@@ -87,9 +92,11 @@ frp-visualizer render examples/structural.frp out --timing-values none
 ```text
 frp-visualizer list
 frp-visualizer example <name> [out.json]
+frp-visualizer init [out.frp] [--force]
 frp-visualizer compile <diagram.frp> [out.json] [--auto-layout]
 frp-visualizer check <diagram.frp|diagram.json> [--strict]
 frp-visualizer render <diagram.json|diagram.frp> [out_dir] [options]
+frp-visualizer version
 frp-visualizer render-example <name> [out_dir] [options]
 ```
 
@@ -105,6 +112,16 @@ frp-visualizer render-example <name> [out_dir] [options]
 | `--timing-network focus|none` | focus 時に active サブグラフを表示するか |
 | `--expand-all` | すべての Component 内部ネットワークを出力 |
 | `--output all|network` | `network` は network.svg のみ出力（構造スケッチ向け） |
+
+## Scope
+
+このツールの中心は **ネットワークを書く → 図と event-flow timing を生成する → 検証する** ことです。
+
+- 正確に扱う: トポロジー、型付きポート、Transaction ごとの発火有無・回数、Component の入出力
+- 明示的に扱う: 構造スケッチ（`mode structural`）と実行モデルの区別、display-only ノード、警告・エラー
+- 任意のバックエンドに委ねる: 値計算、C++ の副作用、実時間、完全な値コピー等価性
+
+通常の `map` は値が不定でもイベントを落とさないため、filter を含まないネットワークでは event-flow timing を正確に生成できます。display-only の値が filter に到達する場合は `timing_reliable=false` として警告します。
 
 ## Examples
 
@@ -209,7 +226,7 @@ frp-visualizer render examples/structural.frp structural-out --output network
 
 JSON はコンパイル済みの IR です。`frp-visualizer example accumulator` で完全な例を確認できます。主なフィールド:
 
-- `nodes`: `id` / `kind` / `name` / `pos` / `note` / `label`
+- `nodes`: `id` / `kind` / `name` / `pos` / `label`
 - `edges`: `from` / `from_port` / `to` / `to_port` / `label` / `label_width`
 - `components`: `name` / `inputs` / `outputs` / `body` / `doc`
 - `annotations`: `text` / `target` / `position`
