@@ -1,5 +1,6 @@
 use crate::model::{text_width, Document, Edge, NodeId, NodeKind, Rect};
 use crate::scene::cloud_points;
+use std::cell::{Cell, RefCell};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
@@ -337,6 +338,165 @@ const SHARED_RADIUS: f32 = 22.0;
 const FANOUT_STEM: f32 = 34.0;
 const FANOUT_LANE_GAP: f32 = EDGE_CLEARANCE + 2.0;
 
+const SEGMENT_INDEX_CELL: f32 = 64.0;
+
+struct SegmentIndex {
+    segments: Vec<([f32; 2], [f32; 2])>,
+    buckets: HashMap<(i32, i32), Vec<usize>>,
+    seen: RefCell<Vec<u64>>,
+    generation: Cell<u64>,
+}
+
+impl SegmentIndex {
+    fn new(existing: &[Vec<[f32; 2]>]) -> Self {
+        let mut segments = Vec::new();
+        let mut buckets: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+        let margin = EDGE_CLEARANCE + 2.0;
+        for route in existing {
+            for window in route.windows(2) {
+                let a = window[0];
+                let b = window[1];
+                let id = segments.len();
+                segments.push((a, b));
+                let min_x = a[0].min(b[0]) - margin;
+                let max_x = a[0].max(b[0]) + margin;
+                let min_y = a[1].min(b[1]) - margin;
+                let max_y = a[1].max(b[1]) + margin;
+                let x0 = (min_x / SEGMENT_INDEX_CELL).floor() as i32;
+                let x1 = (max_x / SEGMENT_INDEX_CELL).floor() as i32;
+                let y0 = (min_y / SEGMENT_INDEX_CELL).floor() as i32;
+                let y1 = (max_y / SEGMENT_INDEX_CELL).floor() as i32;
+                for x in x0..=x1 {
+                    for y in y0..=y1 {
+                        buckets.entry((x, y)).or_default().push(id);
+                    }
+                }
+            }
+        }
+        let seen = RefCell::new(vec![0; segments.len()]);
+        Self {
+            segments,
+            buckets,
+            seen,
+            generation: Cell::new(0),
+        }
+    }
+
+    fn nearby_into(&self, a: [f32; 2], b: [f32; 2], ids: &mut Vec<usize>) {
+        ids.clear();
+        let next = self.generation.get().wrapping_add(1);
+        let generation = if next == 0 {
+            self.seen.borrow_mut().fill(0);
+            1
+        } else {
+            next
+        };
+        self.generation.set(generation);
+        let mut seen = self.seen.borrow_mut();
+        if seen.len() < self.segments.len() {
+            seen.resize(self.segments.len(), 0);
+        }
+        let x0 = (a[0].min(b[0]) / SEGMENT_INDEX_CELL).floor() as i32;
+        let x1 = (a[0].max(b[0]) / SEGMENT_INDEX_CELL).floor() as i32;
+        let y0 = (a[1].min(b[1]) / SEGMENT_INDEX_CELL).floor() as i32;
+        let y1 = (a[1].max(b[1]) / SEGMENT_INDEX_CELL).floor() as i32;
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                if let Some(bucket) = self.buckets.get(&(x, y)) {
+                    for id in bucket {
+                        if seen[*id] != generation {
+                            seen[*id] = generation;
+                            ids.push(*id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn nearby(&self, a: [f32; 2], b: [f32; 2]) -> Vec<usize> {
+        let mut ids = Vec::new();
+        self.nearby_into(a, b, &mut ids);
+        ids
+    }
+}
+
+fn parallel_conflict_indexed(
+    a: [f32; 2],
+    b: [f32; 2],
+    index: &SegmentIndex,
+    edge_start: [f32; 2],
+    edge_end: [f32; 2],
+) -> bool {
+    let ab = [b[0] - a[0], b[1] - a[1]];
+    let ab_length = (ab[0] * ab[0] + ab[1] * ab[1]).sqrt();
+    if ab_length < 1e-3 {
+        return false;
+    }
+    for id in index.nearby(a, b) {
+        let (c, d) = index.segments[id];
+        let Some((c, d)) = trim_segment(c, d, edge_start, SHARED_RADIUS) else {
+            continue;
+        };
+        let Some((c, d)) = trim_segment(c, d, edge_end, SHARED_RADIUS) else {
+            continue;
+        };
+        let cd = [d[0] - c[0], d[1] - c[1]];
+        let cd_length = (cd[0] * cd[0] + cd[1] * cd[1]).sqrt();
+        if cd_length < 1e-3 {
+            continue;
+        }
+        let sin = (ab[0] * cd[1] - ab[1] * cd[0]).abs() / (ab_length * cd_length);
+        if sin < 0.25 && segment_distance(a, b, c, d) < EDGE_CLEARANCE {
+            return true;
+        }
+    }
+    false
+}
+
+fn crossing_penalty_indexed(
+    a: [f32; 2],
+    b: [f32; 2],
+    index: &SegmentIndex,
+    edge_start: [f32; 2],
+    edge_end: [f32; 2],
+) -> f32 {
+    let mut crossings = 0.0;
+    for id in index.nearby(a, b) {
+        let (c, d) = index.segments[id];
+        let Some((c, d)) = trim_segment(c, d, edge_start, SHARED_RADIUS) else {
+            continue;
+        };
+        let Some((c, d)) = trim_segment(c, d, edge_end, SHARED_RADIUS) else {
+            continue;
+        };
+        if segment_crossing(a, b, c, d).is_some() {
+            crossings += CROSSING_PENALTY;
+        }
+    }
+    crossings
+}
+
+fn segment_ok_indexed(
+    a: [f32; 2],
+    b: [f32; 2],
+    obstacles: &[Rect],
+    index: &SegmentIndex,
+    edge_start: [f32; 2],
+    edge_end: [f32; 2],
+    avoidance: EdgeAvoidance,
+) -> bool {
+    if !segment_clear(a, b, obstacles) {
+        return false;
+    }
+    if avoidance == EdgeAvoidance::Hard
+        && parallel_conflict_indexed(a, b, index, edge_start, edge_end)
+    {
+        return false;
+    }
+    true
+}
+
 fn route_obstacles(
     doc: &Document,
     node_rects: &HashMap<NodeId, Rect>,
@@ -550,11 +710,13 @@ fn route_edge_orthogonal(
         start[1] + start_dir[1] * stub,
     ];
     let end_stub = [end[0] + end_dir[0] * stub, end[1] + end_dir[1] * stub];
+    let index = SegmentIndex::new(existing);
     let middle = orthogonal_route(
         start_stub,
         end_stub,
         obstacles,
         existing,
+        &index,
         start,
         end,
         EdgeAvoidance::Hard,
@@ -565,6 +727,7 @@ fn route_edge_orthogonal(
             end_stub,
             obstacles,
             existing,
+            &index,
             start,
             end,
             EdgeAvoidance::Soft,
@@ -576,6 +739,7 @@ fn route_edge_orthogonal(
             end_stub,
             obstacles,
             existing,
+            &index,
             start,
             end,
             EdgeAvoidance::Off,
@@ -590,11 +754,13 @@ fn route_edge_orthogonal(
     Some(points)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn orthogonal_route(
     start: [f32; 2],
     end: [f32; 2],
     obstacles: &[Rect],
     existing: &[Vec<[f32; 2]>],
+    index: &SegmentIndex,
     edge_start: [f32; 2],
     edge_end: [f32; 2],
     avoidance: EdgeAvoidance,
@@ -653,7 +819,7 @@ fn orthogonal_route(
                 [xs[xi], ys[yi]],
                 [xs[xi + 1], ys[yi]],
                 obstacles,
-                existing,
+                index,
                 edge_start,
                 edge_end,
                 avoidance,
@@ -670,7 +836,7 @@ fn orthogonal_route(
                 [xs[xi], ys[yi]],
                 [xs[xi], ys[yi + 1]],
                 obstacles,
-                existing,
+                index,
                 edge_start,
                 edge_end,
                 avoidance,
@@ -816,9 +982,7 @@ fn orthogonal_route(
         .map(|index| [xs[index % nx], ys[index / nx]])
         .collect();
     dedup_points(&mut path);
-    simplify_orthogonal(
-        &mut path, obstacles, existing, edge_start, edge_end, avoidance,
-    );
+    simplify_orthogonal(&mut path, obstacles, index, edge_start, edge_end, avoidance);
     Some(path)
 }
 
@@ -829,7 +993,7 @@ fn orthogonal_penalty(
     a: [f32; 2],
     b: [f32; 2],
     obstacles: &[Rect],
-    existing: &[Vec<[f32; 2]>],
+    index: &SegmentIndex,
     edge_start: [f32; 2],
     edge_end: [f32; 2],
     avoidance: EdgeAvoidance,
@@ -838,7 +1002,7 @@ fn orthogonal_penalty(
         return None;
     }
     let mut penalty = 0.0;
-    if parallel_conflict(a, b, existing, edge_start, edge_end) {
+    if parallel_conflict_indexed(a, b, index, edge_start, edge_end) {
         match avoidance {
             EdgeAvoidance::Hard => return None,
             EdgeAvoidance::Soft => penalty += 600.0,
@@ -848,33 +1012,9 @@ fn orthogonal_penalty(
     // Crossings are legal but expensive, so the router only accepts one when
     // the alternative would be a much longer detour.
     if avoidance != EdgeAvoidance::Off {
-        penalty += crossing_penalty(a, b, existing, edge_start, edge_end);
+        penalty += crossing_penalty_indexed(a, b, index, edge_start, edge_end);
     }
     Some(penalty)
-}
-
-fn crossing_penalty(
-    a: [f32; 2],
-    b: [f32; 2],
-    existing: &[Vec<[f32; 2]>],
-    edge_start: [f32; 2],
-    edge_end: [f32; 2],
-) -> f32 {
-    let mut crossings = 0.0;
-    for route in existing {
-        for window in route.windows(2) {
-            let Some((c, d)) = trim_segment(window[0], window[1], edge_start, SHARED_RADIUS) else {
-                continue;
-            };
-            let Some((c, d)) = trim_segment(c, d, edge_end, SHARED_RADIUS) else {
-                continue;
-            };
-            if segment_crossing(a, b, c, d).is_some() {
-                crossings += CROSSING_PENALTY;
-            }
-        }
-    }
-    crossings
 }
 
 fn relax(
@@ -905,7 +1045,7 @@ fn index_of(values: &[f32], value: f32) -> Option<usize> {
 fn simplify_orthogonal(
     path: &mut Vec<[f32; 2]>,
     obstacles: &[Rect],
-    existing: &[Vec<[f32; 2]>],
+    segments: &SegmentIndex,
     edge_start: [f32; 2],
     edge_end: [f32; 2],
     avoidance: EdgeAvoidance,
@@ -938,10 +1078,10 @@ fn simplify_orthogonal(
             let c = path[index + 2];
             let axis_aligned = (a[0] - c[0]).abs() < 0.1 || (a[1] - c[1]).abs() < 0.1;
             let crossing_ok = avoidance == EdgeAvoidance::Off
-                || crossing_penalty(a, c, existing, edge_start, edge_end) == 0.0;
+                || crossing_penalty_indexed(a, c, segments, edge_start, edge_end) == 0.0;
             if axis_aligned
                 && crossing_ok
-                && segment_ok(a, c, obstacles, existing, edge_start, edge_end, check)
+                && segment_ok_indexed(a, c, obstacles, segments, edge_start, edge_end, check)
             {
                 path.remove(index + 1);
                 changed = true;
@@ -2481,6 +2621,87 @@ s -> c
                     "fan-out branch start enters an unrelated node: {:?}",
                     route.points
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn segment_index_matches_full_scan_conflicts() {
+        let routes = vec![
+            vec![[0.0, 0.0], [200.0, 0.0], [200.0, 120.0], [400.0, 120.0]],
+            vec![[50.0, 300.0], [350.0, 300.0]],
+            vec![[300.0, 0.0], [300.0, 250.0]],
+            vec![[100.0, 50.0], [100.0, 250.0]],
+            vec![[180.0, 220.0], [420.0, 220.0]],
+            vec![[-160.0, -120.0], [-20.0, -120.0], [-20.0, 40.0]],
+            vec![[-180.0, -140.0], [280.0, 360.0]],
+        ];
+        let index = SegmentIndex::new(&routes);
+        let edge_start = [0.0, 0.0];
+        let edge_end = [400.0, 120.0];
+        let scan_crossing = |a: [f32; 2], b: [f32; 2]| {
+            let mut penalty = 0.0;
+            for route in &routes {
+                for window in route.windows(2) {
+                    let Some((c, d)) =
+                        trim_segment(window[0], window[1], edge_start, SHARED_RADIUS)
+                    else {
+                        continue;
+                    };
+                    let Some((c, d)) = trim_segment(c, d, edge_end, SHARED_RADIUS) else {
+                        continue;
+                    };
+                    if segment_crossing(a, b, c, d).is_some() {
+                        penalty += CROSSING_PENALTY;
+                    }
+                }
+            }
+            penalty
+        };
+        let check = |a: [f32; 2], b: [f32; 2]| {
+            assert_eq!(
+                parallel_conflict(a, b, &routes, edge_start, edge_end),
+                parallel_conflict_indexed(a, b, &index, edge_start, edge_end),
+                "parallel mismatch at {a:?}-{b:?}"
+            );
+            assert_eq!(
+                scan_crossing(a, b),
+                crossing_penalty_indexed(a, b, &index, edge_start, edge_end),
+                "crossing mismatch at {a:?}-{b:?}"
+            );
+        };
+
+        for x in (0..520).step_by(17) {
+            for y in (0..360).step_by(19) {
+                let fx = x as f32;
+                let fy = y as f32;
+                for (a, b) in [([fx, fy], [fx + 45.0, fy]), ([fx, fy], [fx, fy + 45.0])] {
+                    check(a, b);
+                }
+            }
+        }
+
+        // Negative coordinates, cell boundaries and clearance boundaries.
+        for x in (-192..512).step_by(13) {
+            for y in (-128..384).step_by(17) {
+                let fx = x as f32;
+                let fy = y as f32;
+                for (a, b) in [([fx, fy], [fx + 37.0, fy]), ([fx, fy], [fx, fy + 37.0])] {
+                    check(a, b);
+                }
+            }
+        }
+        for value in [-128.0, -64.0, -12.0, 0.0, 12.0, 64.0, 128.0, 256.0, 320.0] {
+            for offset in [
+                -EDGE_CLEARANCE - 0.5,
+                -EDGE_CLEARANCE + 0.5,
+                EDGE_CLEARANCE - 0.5,
+                EDGE_CLEARANCE + 0.5,
+            ] {
+                check([value, 100.0], [value, 180.0]);
+                check([value + offset, 100.0], [value + offset, 180.0]);
+                check([100.0, value], [180.0, value]);
+                check([100.0, value + offset], [180.0, value + offset]);
             }
         }
     }
