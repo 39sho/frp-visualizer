@@ -655,6 +655,11 @@ fn simulate_flat(doc: &Document) -> Simulation {
                         (None, None) => None,
                     }
                 }
+                NodeKind::OrElse => {
+                    let left = stream_input(doc, id, 0, &event_values);
+                    let right = stream_input(doc, id, 1, &event_values);
+                    left.or(right)
+                }
                 NodeKind::Snapshot { op } => {
                     let trigger = stream_input(doc, id, 0, &event_values);
                     trigger.map(|ev| {
@@ -1526,5 +1531,45 @@ mod tests {
         let sim = simulate(&doc);
         assert!(sim.warnings.iter().any(|w| w.contains("Simultaneous")));
         assert_eq!(sim.stream(merge)[0].value.to_string(), "1");
+    }
+
+    #[test]
+    fn or_else_prefers_left_without_warning() {
+        let mut doc = Document::blank();
+        let a = doc.add_node(
+            NodeKind::InputEvent {
+                events: vec![
+                    TimedValue::new(1.0, Value::Number(1.0)),
+                    TimedValue::new(3.0, Value::Number(3.0)),
+                ],
+            },
+            [0.0, 0.0],
+        );
+        let b = doc.add_node(
+            NodeKind::InputEvent {
+                events: vec![
+                    TimedValue::new(1.0, Value::Number(2.0)),
+                    TimedValue::new(2.0, Value::Number(20.0)),
+                ],
+            },
+            [0.0, 140.0],
+        );
+        let or_else = doc.add_node(NodeKind::OrElse, [200.0, 60.0]);
+        doc.add_edge(a, or_else, 0).unwrap();
+        doc.add_edge(b, or_else, 1).unwrap();
+        let sim = simulate(&doc);
+        assert!(!sim.warnings.iter().any(|w| w.contains("Simultaneous")));
+        let values: Vec<String> = sim
+            .stream(or_else)
+            .iter()
+            .map(|event| event.value.to_string())
+            .collect();
+        assert_eq!(values, vec!["1", "20", "3"]);
+
+        let report = validate_document(&doc);
+        assert!(!report
+            .errors
+            .iter()
+            .any(|error| error.contains("Simultaneous")));
     }
 }
