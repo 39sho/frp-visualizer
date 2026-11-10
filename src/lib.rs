@@ -364,6 +364,27 @@ mod tests {
     }
 
     #[test]
+    fn component_clouds_render_behind_wires() {
+        let doc = examples::load_example("component").unwrap();
+        let network = crate::layout::layout(&doc);
+        let scene = crate::render_network::render_network(&doc, &network);
+        let cloud = scene
+            .shapes
+            .iter()
+            .position(|shape| matches!(shape, crate::scene::Shape::Cloud { .. }))
+            .expect("component cloud");
+        let wire = scene
+            .shapes
+            .iter()
+            .position(|shape| matches!(shape, crate::scene::Shape::Polyline { .. }))
+            .expect("wire");
+        assert!(
+            cloud < wire,
+            "component clouds must be painted before wires"
+        );
+    }
+
+    #[test]
     fn component_network_can_be_rendered_expanded() {
         let doc = examples::load_example("component").unwrap();
         let svg = render_component_network(&doc, "accumulate", &RenderOptions::default())

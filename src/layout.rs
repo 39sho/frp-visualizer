@@ -1,4 +1,5 @@
-use crate::model::{text_width, Document, NodeId, NodeKind, Rect};
+use crate::model::{text_width, Document, Edge, NodeId, NodeKind, Rect};
+use crate::scene::cloud_points;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
@@ -19,6 +20,10 @@ pub struct EdgeRoute {
     pub points: Vec<[f32; 2]>,
     pub label_pos: [f32; 2],
     pub feedback: bool,
+    /// Point where this edge leaves the shared fan-out trunk.
+    pub fork: Option<[f32; 2]>,
+    /// Interior branch point that should be drawn as a junction marker.
+    pub junction: Option<[f32; 2]>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -49,8 +54,10 @@ pub fn layout_with(doc: &Document, options: &LayoutOptions) -> NetworkLayout {
         node_rects.insert(node.id, node.rect());
     }
 
+    let branches = fanout_branches(doc, &node_rects);
     let mut routes = HashMap::new();
     let mut routed: Vec<Vec<[f32; 2]>> = Vec::new();
+    let mut routed_groups: Vec<Option<FanoutKey>> = Vec::new();
     for edge in &doc.edges {
         let (Some(from), Some(to)) = (doc.node(edge.from), doc.node(edge.to)) else {
             continue;
@@ -65,20 +72,44 @@ pub fn layout_with(doc: &Document, options: &LayoutOptions) -> NetworkLayout {
         let end = input_port_pos(to, to_rect, edge.to_port);
         let end_dir = input_port_dir(to, edge.to_port);
         let obstacles = route_obstacles(doc, &node_rects, edge.from, edge.to);
-        let points = if options.route_style == RouteStyle::Orthogonal {
-            route_edge_orthogonal(&obstacles, &routed, start, [1.0, 0.0], end, end_dir)
-                .unwrap_or_else(|| route_edge(&obstacles, &routed, start, [1.0, 0.0], end, end_dir))
+        let branch = branches.get(&edge.id);
+        let group = branch.map(|branch| branch.key);
+        let mut existing = Vec::new();
+        for (points, source) in routed.iter().zip(routed_groups.iter()) {
+            if group.is_some() && *source == group {
+                continue;
+            }
+            existing.push(points.clone());
+        }
+        let route_start = branch.map(|branch| branch.fork).unwrap_or(start);
+        let middle = if options.route_style == RouteStyle::Orthogonal {
+            route_edge_orthogonal(&obstacles, &existing, route_start, [1.0, 0.0], end, end_dir)
+                .unwrap_or_else(|| {
+                    route_edge(&obstacles, &existing, route_start, [1.0, 0.0], end, end_dir)
+                })
         } else {
-            route_edge(&obstacles, &routed, start, [1.0, 0.0], end, end_dir)
+            route_edge(&obstacles, &existing, route_start, [1.0, 0.0], end, end_dir)
         };
-        let label_pos = route_label_pos(&points);
+        // Keep labels off the shared trunk so fan-out branches stay readable.
+        let label_pos = route_label_pos(&middle);
+        let mut points = if let Some(branch) = branch {
+            let mut points = branch.prefix.clone();
+            points.extend(middle.iter().skip(1).copied());
+            points
+        } else {
+            middle
+        };
+        dedup_points(&mut points);
         routed.push(points.clone());
+        routed_groups.push(group);
         routes.insert(
             edge.id,
             EdgeRoute {
                 points,
                 label_pos,
                 feedback: end[0] < start[0] || end[1] < start[1] - 20.0,
+                fork: branch.map(|branch| branch.fork),
+                junction: branch.and_then(|branch| branch.junction),
             },
         );
     }
@@ -92,6 +123,201 @@ pub fn layout_with(doc: &Document, options: &LayoutOptions) -> NetworkLayout {
     };
     layout.bounds = compute_bounds(doc, &layout);
     layout
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct FanoutKey {
+    node: NodeId,
+    port: usize,
+}
+
+#[derive(Clone, Debug)]
+struct FanoutBranch {
+    key: FanoutKey,
+    fork: [f32; 2],
+    prefix: Vec<[f32; 2]>,
+    junction: Option<[f32; 2]>,
+}
+
+fn fanout_branches(
+    doc: &Document,
+    node_rects: &HashMap<NodeId, Rect>,
+) -> HashMap<u64, FanoutBranch> {
+    let mut groups: HashMap<FanoutKey, Vec<&Edge>> = HashMap::new();
+    for edge in &doc.edges {
+        let (Some(from), Some(to)) = (doc.node(edge.from), doc.node(edge.to)) else {
+            continue;
+        };
+        if edge.from_port >= from.kind.output_types().len()
+            || edge.to_port >= to.kind.input_types().len()
+            || !node_rects.contains_key(&edge.from)
+            || !node_rects.contains_key(&edge.to)
+        {
+            continue;
+        }
+        groups
+            .entry(FanoutKey {
+                node: edge.from,
+                port: edge.from_port,
+            })
+            .or_default()
+            .push(edge);
+    }
+
+    let mut branches = HashMap::new();
+    for (key, edges) in groups {
+        // Two wires can already split cleanly at the source: one goes above,
+        // one goes below, or their targets are far enough apart. Sequential
+        // routing only starts weaving once a port feeds three or more inputs.
+        if edges.len() < 3 {
+            continue;
+        }
+        let (Some(from), Some(from_rect)) =
+            (doc.node(key.node), node_rects.get(&key.node).copied())
+        else {
+            continue;
+        };
+        let port = output_port_pos(from, from_rect, key.port);
+
+        let mut targets: Vec<(u64, f32, f32)> = edges
+            .iter()
+            .filter_map(|edge| {
+                let to = doc.node(edge.to)?;
+                let rect = node_rects.get(&edge.to)?;
+                let y = input_port_pos(to, *rect, edge.to_port)[1];
+                Some((edge.id, y, rect.x))
+            })
+            .collect();
+        targets.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+                .then_with(|| a.0.cmp(&b.0))
+        });
+
+        let desired: Vec<f32> = targets.iter().map(|(_, y, _)| *y).collect();
+        let lanes = fanout_lanes(&desired);
+        let obstacles =
+            route_obstacles_excluding(doc, node_rects, key.node, key.node, Some(key.node));
+        let base_x = from_rect.right() + FANOUT_STEM;
+        let Some((fork_x, detour_y)) = fanout_trunk(port, &lanes, base_x, &obstacles) else {
+            // No safe trunk: leave this port to the normal router instead of
+            // drawing a bus through an unrelated node.
+            continue;
+        };
+        let trunk_min = lanes.iter().copied().fold(detour_y, f32::min);
+        let trunk_max = lanes.iter().copied().fold(detour_y, f32::max);
+
+        for ((edge_id, _, _), lane) in targets.iter().zip(lanes.iter()) {
+            let fork = [fork_x, *lane];
+            let mut prefix = vec![port];
+            if (detour_y - port[1]).abs() > 0.5 {
+                prefix.push([port[0], detour_y]);
+                prefix.push([fork_x, detour_y]);
+            } else {
+                prefix.push([fork_x, port[1]]);
+            }
+            prefix.push(fork);
+            dedup_points(&mut prefix);
+            let interior = *lane > trunk_min + 0.5 && *lane < trunk_max - 0.5;
+            let junction = if interior { Some(fork) } else { None };
+            branches.insert(
+                *edge_id,
+                FanoutBranch {
+                    key,
+                    fork,
+                    prefix,
+                    junction,
+                },
+            );
+        }
+    }
+    branches
+}
+
+fn fanout_trunk(
+    port: [f32; 2],
+    lanes: &[f32],
+    base_x: f32,
+    obstacles: &[Rect],
+) -> Option<(f32, f32)> {
+    let min_lane = lanes.iter().copied().fold(port[1], f32::min);
+    let max_lane = lanes.iter().copied().fold(port[1], f32::max);
+
+    // Prefer a straight horizontal stem at the output-port height.
+    for step in 0..8 {
+        let x = base_x + step as f32 * 8.0;
+        if segment_clear([port[0], port[1]], [x, port[1]], obstacles)
+            && segment_clear([x, min_lane], [x, max_lane], obstacles)
+            && fanout_stubs_clear(x, lanes, obstacles)
+        {
+            return Some((x, port[1]));
+        }
+    }
+
+    // If the direct stem is blocked, rise or fall beside the source first,
+    // then run the trunk above/below the obstruction.
+    for step in 0..48 {
+        let x = base_x + step as f32 * 8.0;
+        if !segment_clear([x, min_lane], [x, max_lane], obstacles)
+            || !fanout_stubs_clear(x, lanes, obstacles)
+        {
+            continue;
+        }
+        let mut candidates = vec![port[1]];
+        candidates.extend(lanes.iter().copied());
+        for rect in obstacles {
+            if rect.right() > port[0] && rect.x < x {
+                candidates.push(rect.y - 2.0);
+                candidates.push(rect.bottom() + 2.0);
+            }
+        }
+        candidates.sort_by(|a, b| {
+            (a - port[1])
+                .abs()
+                .partial_cmp(&(b - port[1]).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        candidates.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+        for y in candidates {
+            if !segment_clear([port[0], port[1]], [port[0], y], obstacles) {
+                continue;
+            }
+            if !segment_clear([port[0], y], [x, y], obstacles) {
+                continue;
+            }
+            let bus_min = y.min(min_lane);
+            let bus_max = y.max(max_lane);
+            if segment_clear([x, bus_min], [x, bus_max], obstacles) {
+                return Some((x, y));
+            }
+        }
+    }
+    None
+}
+
+fn fanout_stubs_clear(fork_x: f32, lanes: &[f32], obstacles: &[Rect]) -> bool {
+    const START_STUB: f32 = 14.0;
+    lanes
+        .iter()
+        .all(|lane| segment_clear([fork_x, *lane], [fork_x + START_STUB, *lane], obstacles))
+}
+
+fn fanout_lanes(desired: &[f32]) -> Vec<f32> {
+    if desired.len() <= 1 {
+        return desired.to_vec();
+    }
+    let mut lanes = desired.to_vec();
+    for index in 1..lanes.len() {
+        lanes[index] = lanes[index].max(lanes[index - 1] + FANOUT_LANE_GAP);
+    }
+    let desired_center = desired.iter().sum::<f32>() / desired.len() as f32;
+    let lane_center = lanes.iter().sum::<f32>() / lanes.len() as f32;
+    let shift = desired_center - lane_center;
+    for lane in &mut lanes {
+        *lane += shift;
+    }
+    lanes
 }
 
 fn input_port_dir(node: &crate::model::Node, port: usize) -> [f32; 2] {
@@ -108,6 +334,8 @@ const ROUTE_CLEARANCE: f32 = 8.0;
 const LABEL_CLEARANCE: f32 = 20.0;
 const EDGE_CLEARANCE: f32 = 12.0;
 const SHARED_RADIUS: f32 = 22.0;
+const FANOUT_STEM: f32 = 34.0;
+const FANOUT_LANE_GAP: f32 = EDGE_CLEARANCE + 2.0;
 
 fn route_obstacles(
     doc: &Document,
@@ -115,13 +343,42 @@ fn route_obstacles(
     start_node: NodeId,
     end_node: NodeId,
 ) -> Vec<Rect> {
+    route_obstacles_excluding(doc, node_rects, start_node, end_node, None)
+}
+
+fn route_obstacles_excluding(
+    doc: &Document,
+    node_rects: &HashMap<NodeId, Rect>,
+    start_node: NodeId,
+    end_node: NodeId,
+    exclude: Option<NodeId>,
+) -> Vec<Rect> {
     let mut obstacles = Vec::new();
     for (id, rect) in node_rects {
+        if exclude == Some(*id) {
+            continue;
+        }
         if *id == start_node || *id == end_node {
             obstacles.push(rect.expand(ROUTE_CLEARANCE));
             if let Some(label) = doc.node(*id).and_then(|node| node_label_rect(node, *rect)) {
                 obstacles.push(label.expand(2.0));
             }
+        } else if doc
+            .node(*id)
+            .map(|node| node.kind.is_component())
+            .unwrap_or(false)
+        {
+            // Cloud lobes bulge past the node rectangle. Expand the obstacle
+            // only as far as the nearest neighbour allows, so tight manual
+            // layouts keep a routing corridor instead of falling back to a
+            // straight line through the cloud.
+            let [left, right, top, bottom] = component_cloud_padding(*rect, node_rects, *id);
+            obstacles.push(Rect::new(
+                rect.x - ROUTE_CLEARANCE - left,
+                rect.y - ROUTE_CLEARANCE - top,
+                rect.w + ROUTE_CLEARANCE * 2.0 + left + right,
+                rect.h + ROUTE_CLEARANCE * 2.0 + top + bottom,
+            ));
         } else {
             obstacles.push(Rect::new(
                 rect.x - ROUTE_CLEARANCE,
@@ -132,6 +389,56 @@ fn route_obstacles(
         }
     }
     obstacles
+}
+
+fn component_cloud_overhang(rect: Rect) -> [f32; 2] {
+    let mut overhang_x: f32 = 0.0;
+    let mut overhang_y: f32 = 0.0;
+    for point in cloud_points(rect) {
+        overhang_x = overhang_x.max((rect.x - point[0]).max(point[0] - rect.right()));
+        overhang_y = overhang_y.max((rect.y - point[1]).max(point[1] - rect.bottom()));
+    }
+    [overhang_x, overhang_y]
+}
+
+fn component_cloud_padding(rect: Rect, node_rects: &HashMap<NodeId, Rect>, id: NodeId) -> [f32; 4] {
+    let [overhang_x, overhang_y] = component_cloud_overhang(rect);
+    let mut left = overhang_x;
+    let mut right = overhang_x;
+    let mut top = overhang_y;
+    let mut bottom = overhang_y;
+    // Leave room for the router's 14px endpoint stub plus a small gap when
+    // another node sits next to the component.
+    let side_corridor = ROUTE_CLEARANCE * 2.0 + 16.0;
+    let vertical_corridor = side_corridor + LABEL_CLEARANCE;
+    for (other_id, other) in node_rects {
+        if *other_id == id {
+            continue;
+        }
+        // Only nodes that actually share a side corridor should cap the
+        // expansion. A far-away node must not shrink clearance around the
+        // cloud just because it happens to be above or below it.
+        let overlaps_y = other.bottom() > rect.y && other.y < rect.bottom();
+        let overlaps_x = other.right() > rect.x && other.x < rect.right();
+        if overlaps_y {
+            if other.right() <= rect.x {
+                left = left.min((rect.x - other.right() - side_corridor).max(0.0));
+            }
+            if other.x >= rect.right() {
+                right = right.min((other.x - rect.right() - side_corridor).max(0.0));
+            }
+        }
+        if overlaps_x {
+            if other.bottom() <= rect.y {
+                top = top.min((rect.y - other.bottom() - side_corridor).max(0.0));
+            }
+            if other.y >= rect.bottom() {
+                // The node below draws its label above itself.
+                bottom = bottom.min((other.y - rect.bottom() - vertical_corridor).max(0.0));
+            }
+        }
+    }
+    [left, right, top, bottom]
 }
 
 fn node_label_rect(node: &crate::model::Node, rect: Rect) -> Option<Rect> {
@@ -1599,13 +1906,54 @@ mod tests {
         sin < 0.25 && segment_distance(a, b, c, d) < EDGE_CLEARANCE - 0.5
     }
 
-    fn check_routes(key: &str, network: &NetworkLayout) {
+    fn fanout_fork_index(doc: &Document, edge: &Edge, route: &EdgeRoute) -> Option<usize> {
+        let fanout_edges = doc
+            .edges
+            .iter()
+            .filter(|other| other.from == edge.from && other.from_port == edge.from_port)
+            .count();
+        if fanout_edges < 3 {
+            return None;
+        }
+        let fork = route.fork?;
+        route
+            .points
+            .iter()
+            .position(|point| same_point(*point, fork))
+    }
+
+    fn check_routes(key: &str, doc: &Document, network: &NetworkLayout) {
         let mut routes: Vec<_> = network.edge_routes.iter().collect();
         routes.sort_by_key(|(id, _)| **id);
         for i in 0..routes.len() {
             for j in i + 1..routes.len() {
-                let a_segments = trimmed_segments(&routes[i].1.points);
-                let b_segments = trimmed_segments(&routes[j].1.points);
+                let a_edge = doc.edge(*routes[i].0);
+                let b_edge = doc.edge(*routes[j].0);
+                let same_fanout_group = match (a_edge, b_edge) {
+                    (Some(a), Some(b)) => {
+                        let count = doc
+                            .edges
+                            .iter()
+                            .filter(|other| other.from == a.from && other.from_port == a.from_port)
+                            .count();
+                        a.from == b.from && a.from_port == b.from_port && count >= 3
+                    }
+                    _ => false,
+                };
+                let (a_start, b_start) = if same_fanout_group {
+                    (
+                        a_edge
+                            .and_then(|edge| fanout_fork_index(doc, edge, routes[i].1))
+                            .unwrap_or(0),
+                        b_edge
+                            .and_then(|edge| fanout_fork_index(doc, edge, routes[j].1))
+                            .unwrap_or(0),
+                    )
+                } else {
+                    (0, 0)
+                };
+                let a_segments = trimmed_segments(&routes[i].1.points[a_start..]);
+                let b_segments = trimmed_segments(&routes[j].1.points[b_start..]);
                 for &(a, b) in &a_segments {
                     for &(c, d) in &b_segments {
                         assert!(
@@ -1819,12 +2167,332 @@ mod tests {
     }
 
     #[test]
+    fn fanout_wires_share_a_trunk_instead_of_weaving() {
+        let source = "\
+diagram Fan out
+layout auto
+time_end 2
+
+stream s events 1:1
+map m = identity
+sink a
+sink b
+sink c
+
+s -> m
+m -> a
+m -> b
+m -> c
+";
+        let doc = crate::dsl::parse(source).unwrap().doc;
+        let map = doc.nodes.iter().find(|node| node.name == "m").unwrap();
+        let network = layout(&doc);
+        let map_rect = network.node_rects[&map.id];
+        let port = output_port_pos(map, map_rect, 0);
+
+        let mut routes = Vec::new();
+        for name in ["a", "b", "c"] {
+            let sink = doc.nodes.iter().find(|node| node.name == name).unwrap();
+            let edge = doc
+                .edges
+                .iter()
+                .find(|edge| edge.from == map.id && edge.to == sink.id)
+                .unwrap();
+            let route = network.edge_routes.get(&edge.id).unwrap();
+            assert_eq!(route.points.first().copied(), Some(port));
+            assert!(
+                route.points.len() <= 6,
+                "{name} route should not weave: {:?}",
+                route.points
+            );
+            routes.push(route);
+        }
+
+        let fork_x = routes[0].points[1][0];
+        for route in &routes {
+            assert!(
+                (route.points[1][0] - fork_x).abs() < 0.5,
+                "fan-out routes should share one trunk: {:?}",
+                route.points
+            );
+        }
+        assert!(port[0] < fork_x);
+        assert_eq!(
+            routes
+                .iter()
+                .filter(|route| route.junction.is_some())
+                .count(),
+            1,
+            "the middle branch should mark its junction"
+        );
+    }
+
+    #[test]
+    fn routes_keep_clear_of_component_cloud_lobes() {
+        let source = "\
+diagram Cloud occlusion
+layout manual
+time_end 2
+
+component wide {
+  in a: stream
+  in b: stream
+  in c: stream
+  in d: stream
+  out x: stream
+  out y: stream
+  out z: stream
+  out w: stream
+  body \"cloud body line\"
+}
+
+stream s events 1:1 at 40,240
+component cloud = wide at 300,160
+sink out at 640,240
+
+s -> out
+";
+        let doc = crate::dsl::parse(source).unwrap().doc;
+        let network = layout(&doc);
+        let cloud = doc.nodes.iter().find(|node| node.name == "cloud").unwrap();
+        let rect = network.node_rects[&cloud.id];
+        let points = cloud_points(rect);
+        let (mut min_x, mut min_y) = (f32::INFINITY, f32::INFINITY);
+        let (mut max_x, mut max_y) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for point in &points {
+            min_x = min_x.min(point[0]);
+            min_y = min_y.min(point[1]);
+            max_x = max_x.max(point[0]);
+            max_y = max_y.max(point[1]);
+        }
+        let cloud_bounds = Rect::new(min_x, min_y, max_x - min_x, max_y - min_y);
+
+        let source = doc.nodes.iter().find(|node| node.name == "s").unwrap();
+        let sink = doc.nodes.iter().find(|node| node.name == "out").unwrap();
+        let edge = doc
+            .edges
+            .iter()
+            .find(|edge| edge.from == source.id && edge.to == sink.id)
+            .unwrap();
+        let route = network.edge_routes.get(&edge.id).unwrap();
+        for pair in route.points.windows(2) {
+            assert!(
+                !segment_hits_rect(pair[0], pair[1], &cloud_bounds),
+                "wire {}-{} runs under the component cloud: {:?}",
+                source.name,
+                sink.name,
+                route.points
+            );
+        }
+    }
+
+    #[test]
+    fn cloud_clearance_keeps_tight_corridors_routable() {
+        use crate::model::{Node, PortSpec, PortType};
+        let mut doc = Document::blank();
+        let mut source = Node::new(
+            0,
+            NodeKind::InputEvent { events: Vec::new() },
+            [61.16, 66.06],
+        );
+        source.name = "s".into();
+        doc.nodes.push(source);
+        let inputs = (0..4)
+            .map(|index| PortSpec {
+                name: format!("in{index}"),
+                ty: PortType::Stream,
+            })
+            .collect();
+        let outputs = (0..4)
+            .map(|index| PortSpec {
+                name: format!("out{index}"),
+                ty: PortType::Stream,
+            })
+            .collect();
+        let mut component = Node::new(
+            0,
+            NodeKind::Component {
+                definition: None,
+                inputs,
+                outputs,
+                body: vec!["cloud body line".into()],
+            },
+            [445.25, 185.13],
+        );
+        component.name = "cloud".into();
+        doc.nodes.push(component);
+        let mut sink = Node::new(0, NodeKind::Sink, [695.97, 308.49]);
+        sink.name = "out".into();
+        doc.nodes.push(sink);
+        // Re-number the nodes so the layout sees a normal document.
+        for (index, node) in doc.nodes.iter_mut().enumerate() {
+            node.id = index as u64 + 1;
+        }
+        let from = doc.nodes[0].id;
+        let to = doc.nodes[2].id;
+        doc.add_edge(from, to, 0).unwrap();
+
+        let network = layout(&doc);
+        let route = network.edge_routes.get(&doc.edges[0].id).unwrap();
+        for pair in route.points.windows(2) {
+            assert!(
+                (pair[0][0] - pair[1][0]).abs() < 0.5 || (pair[0][1] - pair[1][1]).abs() < 0.5,
+                "tight cloud corridor should stay orthogonal: {:?}",
+                route.points
+            );
+        }
+    }
+
+    #[test]
+    fn fanout_trunk_routes_around_a_blocking_node() {
+        let source = "\
+diagram Fan out obstacle
+layout manual
+time_end 2
+
+stream s events 1:1 at 40,200
+map blocker = identity at 90,180
+sink a at 500,100
+sink b at 500,250
+sink c at 500,400
+
+s -> a
+s -> b
+s -> c
+";
+        let doc = crate::dsl::parse(source).unwrap().doc;
+        let network = layout(&doc);
+        let blocker = doc
+            .nodes
+            .iter()
+            .find(|node| node.name == "blocker")
+            .unwrap();
+        let blocker_rect = network.node_rects[&blocker.id];
+        for edge in &doc.edges {
+            let route = network.edge_routes.get(&edge.id).unwrap();
+            for pair in route.points.windows(2) {
+                assert!(
+                    (pair[0][0] - pair[1][0]).abs() < 0.5 || (pair[0][1] - pair[1][1]).abs() < 0.5,
+                    "fan-out detour should stay orthogonal: {:?}",
+                    route.points
+                );
+                assert!(
+                    !segment_hits_rect(pair[0], pair[1], &blocker_rect),
+                    "fan-out wire crosses an unrelated node: {:?}",
+                    route.points
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn distant_nodes_do_not_shrink_cloud_clearance() {
+        let source = "\
+diagram Cloud clearance
+layout manual
+time_end 2
+
+component wide {
+  in a: stream
+  in b: stream
+  in c: stream
+  in d: stream
+  out x: stream
+  out y: stream
+  out z: stream
+  out w: stream
+  body \"cloud body line\"
+}
+
+stream s events 1:1 at 40,314
+component cloud = wide at 300,160
+sink out at 640,314
+sink far at 1000,330
+
+s -> out
+";
+        let doc = crate::dsl::parse(source).unwrap().doc;
+        let network = layout(&doc);
+        let cloud = doc.nodes.iter().find(|node| node.name == "cloud").unwrap();
+        let rect = network.node_rects[&cloud.id];
+        let points = cloud_points(rect);
+        let (mut min_x, mut min_y) = (f32::INFINITY, f32::INFINITY);
+        let (mut max_x, mut max_y) = (f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for point in &points {
+            min_x = min_x.min(point[0]);
+            min_y = min_y.min(point[1]);
+            max_x = max_x.max(point[0]);
+            max_y = max_y.max(point[1]);
+        }
+        let cloud_bounds = Rect::new(min_x, min_y, max_x - min_x, max_y - min_y);
+
+        let source = doc.nodes.iter().find(|node| node.name == "s").unwrap();
+        let sink = doc.nodes.iter().find(|node| node.name == "out").unwrap();
+        let edge = doc
+            .edges
+            .iter()
+            .find(|edge| edge.from == source.id && edge.to == sink.id)
+            .unwrap();
+        let route = network.edge_routes.get(&edge.id).unwrap();
+        for pair in route.points.windows(2) {
+            assert!(
+                !segment_hits_rect(pair[0], pair[1], &cloud_bounds),
+                "a distant node shrank the cloud clearance: {:?}",
+                route.points
+            );
+        }
+    }
+
+    #[test]
+    fn fanout_branch_stubs_do_not_enter_a_blocker() {
+        let source = "\
+diagram Fan out blocker at fork
+layout manual
+time_end 2
+
+stream s events 1:1 at 40,200
+map blocker = identity at 130,180
+sink a at 500,100
+sink b at 500,200
+sink c at 500,400
+
+s -> a
+s -> b
+s -> c
+";
+        let doc = crate::dsl::parse(source).unwrap().doc;
+        let network = layout(&doc);
+        let blocker = doc
+            .nodes
+            .iter()
+            .find(|node| node.name == "blocker")
+            .unwrap();
+        let blocker_rect = network.node_rects[&blocker.id];
+        for edge in &doc.edges {
+            let route = network.edge_routes.get(&edge.id).unwrap();
+            for pair in route.points.windows(2) {
+                assert!(
+                    (pair[0][0] - pair[1][0]).abs() < 0.5 || (pair[0][1] - pair[1][1]).abs() < 0.5,
+                    "fan-out should stay orthogonal: {:?}",
+                    route.points
+                );
+                assert!(
+                    !segment_hits_rect(pair[0], pair[1], &blocker_rect),
+                    "fan-out branch start enters an unrelated node: {:?}",
+                    route.points
+                );
+            }
+        }
+    }
+
+    #[test]
     fn example_routes_do_not_overlap() {
         for (_, key) in examples::EXAMPLES {
             let doc = examples::load_example(key).unwrap();
-            check_routes(key, &layout(&doc));
+            check_routes(key, &doc, &layout(&doc));
             check_routes(
                 key,
+                &doc,
                 &layout_with(
                     &doc,
                     &LayoutOptions {
@@ -1835,9 +2503,10 @@ mod tests {
 
             let mut auto = doc;
             auto_layout(&mut auto);
-            check_routes(key, &layout(&auto));
+            check_routes(key, &auto, &layout(&auto));
             check_routes(
                 key,
+                &auto,
                 &layout_with(
                     &auto,
                     &LayoutOptions {
