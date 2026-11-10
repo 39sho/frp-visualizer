@@ -15,13 +15,13 @@ const ROW_H: f32 = 66.0;
 const FOOTER_H: f32 = 52.0;
 const EVENT_FIRST_FRAC: f32 = 0.14;
 const EVENT_LAST_FRAC: f32 = 0.62;
-const CELL_UPDATE_FRAC: f32 = 0.74;
 
 #[derive(Clone, Copy, Debug)]
 struct EventSlot {
     x: f32,
     order: usize,
     count: usize,
+    half_width: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -29,6 +29,16 @@ struct LaneGeometry {
     x0: f32,
     x1: f32,
     baseline: f32,
+}
+
+struct DependencyContext<'a> {
+    doc: &'a Document,
+    sim: &'a Simulation,
+    lanes: &'a [LaneSpec],
+    event_slots: &'a HashMap<(NodeId, i64), EventSlot>,
+    baselines: &'a [f32],
+    tx_xs: &'a [f32],
+    x1: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -124,12 +134,18 @@ pub fn render_timing(
         let end = tx_xs.get(trace.index + 1).copied().unwrap_or(x1);
         let count = trace.event_order.len();
         for (order, id) in trace.event_order.iter().enumerate() {
+            let half_width = trace
+                .events
+                .get(id)
+                .map(|value| (text_width(&timing_label(value, 20), 12.0) + 13.0) / 2.0)
+                .unwrap_or(0.0);
             event_slots.insert(
                 (*id, time_key(trace.time)),
                 EventSlot {
                     x: event_slot_x(start, end, order, count),
                     order,
                     count,
+                    half_width,
                 },
             );
         }
@@ -149,10 +165,17 @@ pub fn render_timing(
     scene.text([20.0, 18.0], "transactions", 10.5, MUTED, TextAnchor::Start);
     scene.text(
         [20.0, 33.0],
-        "Tn start · events in order · cells update at Tn end",
+        "Tn start · events in order · cell updates at Tn+1 boundary",
         9.5,
         FAINT,
         TextAnchor::Start,
+    );
+    scene.text(
+        [x1, 18.0],
+        "solid: event flow · dashed: cell dependency",
+        9.0,
+        FAINT,
+        TextAnchor::End,
     );
     if options.show_transactions {
         for (i, t) in sim.transactions.iter().enumerate() {
@@ -184,6 +207,9 @@ pub fn render_timing(
         [label_w + 10.0, axis_y - 6.0],
         Stroke::new(crate::scene::Color(0, 0, 0, 20), 1.0),
     );
+    let lane_baselines: Vec<f32> = (0..lanes.len())
+        .map(|index| first_row_y + index as f32 * row_h + 33.0)
+        .collect();
 
     for (index, lane) in lanes.iter().enumerate() {
         let row_y = first_row_y + index as f32 * row_h;
@@ -200,7 +226,7 @@ pub fn render_timing(
             [width - 16.0, row_y + row_h],
             Stroke::new(crate::scene::Color(0, 0, 0, 18), 1.0),
         );
-        let baseline = row_y + 33.0;
+        let baseline = lane_baselines[index];
 
         let is_cell = lane.kind == PortType::Cell;
         let kind = if is_cell { "cell" } else { "stream" };
@@ -236,8 +262,24 @@ pub fn render_timing(
         );
         let head = arrow_head([x1, baseline], [1.0, 0.0], 8.0);
         scene.path(head, true, timeline_color, None);
+    }
 
-        if is_cell {
+    draw_dependencies(
+        &mut scene,
+        &DependencyContext {
+            doc: focus_doc,
+            sim,
+            lanes,
+            event_slots: &event_slots,
+            baselines: &lane_baselines,
+            tx_xs: &tx_xs,
+            x1,
+        },
+    );
+
+    for (index, lane) in lanes.iter().enumerate() {
+        let baseline = lane_baselines[index];
+        if lane.kind == PortType::Cell {
             draw_cell(
                 &mut scene,
                 sim.cell(lane.source),
@@ -259,6 +301,15 @@ pub fn render_timing(
             );
         }
     }
+
+    draw_final_cell_states(
+        &mut scene,
+        lanes,
+        sim,
+        x1,
+        &lane_baselines,
+        options.show_values,
+    );
 
     scene.line([x0, axis_y], [x1, axis_y], Stroke::new(INK, 1.3));
     let head = arrow_head([x1, axis_y], [1.0, 0.0], 8.0);
@@ -652,6 +703,171 @@ fn draw_cell(
     }
 }
 
+fn draw_final_cell_states(
+    scene: &mut Scene,
+    lanes: &[LaneSpec],
+    sim: &Simulation,
+    x1: f32,
+    baselines: &[f32],
+    show_values: bool,
+) {
+    if !show_values {
+        return;
+    }
+    let mut has_final = false;
+    for (index, lane) in lanes.iter().enumerate() {
+        if lane.kind != PortType::Cell {
+            continue;
+        }
+        let Some(last) = sim.cell(lane.source).last() else {
+            continue;
+        };
+        let Some(transaction) = sim
+            .transactions
+            .iter()
+            .position(|time| (time - last.time).abs() < 1e-9)
+        else {
+            continue;
+        };
+        if transaction + 1 < sim.transactions.len() {
+            continue;
+        }
+        let baseline = baselines[index];
+        let label = timing_label(&last.value, 22);
+        let size = 11.5;
+        let width = (text_width(&label, size) + 12.0).clamp(26.0, 38.0);
+        let x = x1 + 4.0;
+        scene.line([x1, baseline], [x, baseline], Stroke::new(CELL_INK, 1.0));
+        scene.rect(
+            Rect::new(x, baseline - 9.0, width, 18.0),
+            4.0,
+            BLUE,
+            Some(Stroke::new(CELL_INK, 1.2)),
+        );
+        scene.text(
+            [x + width / 2.0, baseline],
+            fit_text(&label, width - 8.0, size),
+            size,
+            INK,
+            TextAnchor::Center,
+        );
+        has_final = true;
+    }
+    if has_final {
+        scene.text([x1 + 4.0, 48.0], "after", 8.5, FAINT, TextAnchor::Start);
+    }
+}
+
+fn draw_dependencies(scene: &mut Scene, context: &DependencyContext<'_>) {
+    let doc = context.doc;
+    let sim = context.sim;
+    let lanes = context.lanes;
+    let event_slots = context.event_slots;
+    let baselines = context.baselines;
+    let tx_xs = context.tx_xs;
+    let x1 = context.x1;
+    let lane_by_id: HashMap<NodeId, usize> = lanes
+        .iter()
+        .enumerate()
+        .map(|(index, lane)| (lane.source, index))
+        .collect();
+    let event_color = crate::scene::Color(45, 108, 223, 145);
+    let cell_color = crate::scene::Color(74, 121, 158, 125);
+
+    for trace in &sim.traces {
+        let key = time_key(trace.time);
+        let start = tx_xs.get(trace.index).copied().unwrap_or(0.0);
+        let boundary = tx_xs.get(trace.index + 1).copied().unwrap_or(x1);
+        let updates: HashMap<NodeId, usize> = trace
+            .update_order
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (*id, index))
+            .collect();
+
+        for edge in &doc.edges {
+            let Some(&source_lane) = lane_by_id.get(&edge.from) else {
+                continue;
+            };
+            let Some(&target_lane) = lane_by_id.get(&edge.to) else {
+                continue;
+            };
+            let source_event = event_slots.get(&(edge.from, key)).copied();
+            let target_event = event_slots.get(&(edge.to, key)).copied();
+            let source_is_cell = lanes[source_lane].kind == PortType::Cell;
+            let target_is_cell = lanes[target_lane].kind == PortType::Cell;
+            let target_updated = updates.contains_key(&edge.to);
+            let source_updated = updates.get(&edge.from).copied();
+
+            let (source, target, is_cell_dependency) = match (source_event, target_event) {
+                (Some(source), Some(target)) => (
+                    event_anchor(source, baselines[source_lane]),
+                    event_target(target, baselines[target_lane]),
+                    false,
+                ),
+                (Some(source), None) if target_is_cell && target_updated => (
+                    event_anchor(source, baselines[source_lane]),
+                    [boundary - 2.0, baselines[target_lane] - 12.0],
+                    true,
+                ),
+                (None, Some(target)) if source_is_cell => {
+                    let source_x = start;
+                    (
+                        [source_x, baselines[source_lane] - 12.0],
+                        event_target(target, baselines[target_lane]),
+                        true,
+                    )
+                }
+                (None, None) if source_is_cell && target_is_cell && target_updated => {
+                    let source_x = source_updated
+                        .filter(|source_order| {
+                            updates
+                                .get(&edge.to)
+                                .is_some_and(|target_order| source_order < target_order)
+                        })
+                        .map(|_| boundary - 8.0)
+                        .unwrap_or(start);
+                    (
+                        [source_x, baselines[source_lane] - 12.0],
+                        [boundary - 2.0, baselines[target_lane] - 12.0],
+                        true,
+                    )
+                }
+                _ => continue,
+            };
+
+            if target[0] <= source[0] + 3.0 {
+                continue;
+            }
+            let middle = ((source[0] + target[0]) / 2.0)
+                .max(source[0] + 6.0)
+                .min(target[0] - 6.0);
+            let points = vec![source, [middle, source[1]], [middle, target[1]], target];
+            let color = if is_cell_dependency {
+                cell_color
+            } else {
+                event_color
+            };
+            let stroke = if is_cell_dependency {
+                Stroke::dashed(color, 0.9, 2.5, 2.5)
+            } else {
+                Stroke::new(color, 1.1)
+            };
+            scene.polyline(crate::scene::rounded_polyline(&points, 5.0), stroke);
+            let head = arrow_head(target, [1.0, 0.0], 5.0);
+            scene.path(head, true, color, None);
+        }
+    }
+}
+
+fn event_anchor(slot: EventSlot, baseline: f32) -> [f32; 2] {
+    [slot.x + slot.half_width + 2.0, baseline]
+}
+
+fn event_target(slot: EventSlot, baseline: f32) -> [f32; 2] {
+    [slot.x - slot.half_width - 2.0, baseline]
+}
+
 fn event_slot_x(start: f32, end: f32, order: usize, count: usize) -> f32 {
     let span = (end - start).max(1.0);
     let fraction = if count <= 1 {
@@ -663,7 +879,7 @@ fn event_slot_x(start: f32, end: f32, order: usize, count: usize) -> f32 {
 }
 
 fn cell_update_x(start: f32, end: f32) -> f32 {
-    start + (end - start).max(1.0) * CELL_UPDATE_FRAC
+    end.max(start + 1.0)
 }
 
 fn time_key(time: f64) -> i64 {
@@ -699,6 +915,6 @@ mod tests {
     fn cell_updates_happen_after_the_event_sequence() {
         let update = cell_update_x(100.0, 200.0);
         assert!(update > event_slot_x(100.0, 200.0, 9, 10));
-        assert!(update < 200.0);
+        assert_eq!(update, 200.0);
     }
 }

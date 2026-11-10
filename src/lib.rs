@@ -265,6 +265,9 @@ mod tests {
         }
         assert!(bundle.timing.contains("Tn start"));
         assert!(bundle.timing.contains("events in order"));
+        assert!(bundle.timing.contains("solid: event flow"));
+        assert!(bundle.timing.contains("dashed: cell dependency"));
+        assert!(bundle.timing.contains(">after</text>"));
         assert!(bundle.timing.contains(">#1</text>"));
         assert!(bundle.timing.contains(">T1</text>"));
 
