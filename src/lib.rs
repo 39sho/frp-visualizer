@@ -264,6 +264,11 @@ mod tests {
             assert!(bundle.network.contains(needle), "network missing {needle}");
         }
         assert!(bundle.timing.contains("Tn start"));
+        assert!(bundle.timing.contains("events in order"));
+        assert!(bundle.timing.contains("solid: event flow"));
+        assert!(bundle.timing.contains("dashed: cell dependency"));
+        assert!(bundle.timing.contains(">after</text>"));
+        assert!(bundle.timing.contains(">#1</text>"));
         assert!(bundle.timing.contains(">T1</text>"));
 
         let filter_doc = examples::load_example("map_filter").unwrap();
@@ -368,6 +373,75 @@ mod tests {
         assert!(svg.contains(">merge</text>"));
         assert!(svg.contains(">hold</text>"));
         assert!(render_component_network(&doc, "missing", &RenderOptions::default()).is_none());
+    }
+
+    #[test]
+    fn timing_keeps_the_final_cell_state_visible() {
+        let mut doc = Document::blank();
+        doc.time_end = 50.0;
+        doc.add_node(
+            NodeKind::InputCell {
+                initial: Value::Number(0.0),
+                changes: vec![TimedValue::new(49.0, Value::Number(5.0))],
+            },
+            [0.0, 0.0],
+        );
+        doc.add_node(
+            NodeKind::InputEvent {
+                events: vec![TimedValue::new(50.0, Value::Number(1.0))],
+            },
+            [100.0, 0.0],
+        );
+        let bundle = render_svgs(&doc);
+        assert!(bundle.timing.contains(">after</text>"));
+        assert!(bundle.timing.contains(">5</text>"));
+    }
+
+    #[test]
+    fn timing_draws_dependencies_for_long_event_chains() {
+        let mut doc = Document::blank();
+        doc.time_end = 6.0;
+        let source = doc.add_node(
+            NodeKind::InputEvent {
+                events: vec![
+                    TimedValue::new(4.0, Value::Number(1.0)),
+                    TimedValue::new(5.0, Value::Number(2.0)),
+                ],
+            },
+            [0.0, 0.0],
+        );
+        let mut previous = source;
+        for index in 0..4 {
+            let map = doc.add_node(
+                NodeKind::Map {
+                    op: UnaryOp::Identity,
+                },
+                [100.0 + index as f32 * 100.0, 0.0],
+            );
+            doc.add_edge(previous, map, 0).unwrap();
+            previous = map;
+        }
+        let sink = doc.add_node(NodeKind::Sink, [600.0, 0.0]);
+        doc.add_edge(previous, sink, 0).unwrap();
+
+        let bundle = render_svgs(&doc);
+        assert!(
+            bundle.timing.matches("rgba(45,108,223").count() >= 8,
+            "long event chain lost its dependency lines"
+        );
+    }
+
+    #[test]
+    fn event_only_timing_keeps_order_labels_and_dependency_anchors() {
+        let doc = examples::load_example("calibration").unwrap();
+        let options = render_timing::TimingOptions {
+            show_values: false,
+            ..Default::default()
+        };
+        let bundle = render_svgs_with(&doc, &options);
+        assert!(bundle.timing.contains(">#1</text>"));
+        assert!(bundle.timing.contains("solid: event flow"));
+        assert!(bundle.timing.contains("circle"));
     }
 
     #[test]
