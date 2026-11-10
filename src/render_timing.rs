@@ -851,12 +851,16 @@ fn draw_dependencies(scene: &mut Scene, context: &DependencyContext<'_>) {
                 _ => continue,
             };
 
-            if target[0] <= source[0] + 3.0 {
+            if target[0] < source[0] {
                 continue;
             }
-            let middle = ((source[0] + target[0]) / 2.0)
-                .max(source[0] + 6.0)
-                .min(target[0] - 6.0);
+            let middle = if target[0] - source[0] < 12.0 {
+                (source[0] + target[0]) / 2.0
+            } else {
+                ((source[0] + target[0]) / 2.0)
+                    .max(source[0] + 6.0)
+                    .min(target[0] - 6.0)
+            };
             let points = vec![source, [middle, source[1]], [middle, target[1]], target];
             let color = if is_cell_dependency {
                 cell_color

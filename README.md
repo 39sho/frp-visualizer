@@ -225,7 +225,7 @@ frp-visualizer render examples/component.frp out --timing-scope all --timing-val
 
 `--timing-values none` は値を出さず、イベントの発火時刻と件数だけを表示します。`--focus-transaction N` と組み合わせると、その Transaction で active なノードと接続だけを timing 内のインセットに表示します。値・副作用の計算は行いません。
 
-Timeline の stream event は Transaction 内の発火順に左から右へ配置され、`#1`, `#2`, … がその順序です。セルはイベント列の後、次の Transaction との境界で更新されます。境界を越えた次の Transaction から新しい値が見えます。
+Timeline の stream event は、その timing scope で可視の event を Transaction 内の発火順に左から右へ配置し、`#1`, `#2`, … がその順序です。セルはイベント列の後、次の Transaction との境界で更新されます。境界を越えた次の Transaction から新しい値が見えます。
 
 依存関係は、stream event 間を実線、cell を含む依存を破線で表示します。`Event -> Event`、`Event -> Cell update`、`Cell -> Event`、`Cell -> Cell update` のような直接の接続を、同じ Transaction 内の位置関係に沿って結びます。各 cell lane の最終値は右端の `after` 列にも表示されます。
 
