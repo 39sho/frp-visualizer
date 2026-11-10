@@ -227,7 +227,9 @@ frp-visualizer render examples/component.frp out --timing-scope all --timing-val
 
 Timeline の stream event は Transaction 内の発火順に左から右へ配置され、`#1`, `#2`, … がその順序です。セルはイベント列の後、次の Transaction との境界で更新されます。境界を越えた次の Transaction から新しい値が見えます。
 
-依存関係は、stream event 間を実線、cell を含む依存を破線で表示します。`Event -> Event`、`Event -> Cell update`、`Cell -> Event`、`Cell -> Cell update` のような直接の接続を、同じ Transaction 内の位置関係に沿って結びます。
+依存関係は、stream event 間を実線、cell を含む依存を破線で表示します。`Event -> Event`、`Event -> Cell update`、`Cell -> Event`、`Cell -> Cell update` のような直接の接続を、同じ Transaction 内の位置関係に沿って結びます。各 cell lane の最終値は右端の `after` 列にも表示されます。
+
+Component の外側 timeline では、表示されている lane 間に直接 edge がない場合、依存線は省略されます。内部の依存は `--timing-scope all` で出力される `timing_<component>.svg` を確認してください。
 
 `render` は検証エラーがある文書を書き出しません。`check --strict` と併用してください。`trace.json` には `timing_reliable` / `values_reliable`、Transaction ごとの events / event_order / cell updates / update_order、lane ごとの event/step が入ります。
 

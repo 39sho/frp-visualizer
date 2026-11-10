@@ -376,6 +376,35 @@ mod tests {
     }
 
     #[test]
+    fn timing_keeps_the_final_cell_state_visible() {
+        let mut doc = Document::blank();
+        doc.time_end = 50.0;
+        doc.add_node(
+            NodeKind::InputCell {
+                initial: Value::Number(0.0),
+                changes: vec![TimedValue::new(49.0, Value::Number(5.0))],
+            },
+            [0.0, 0.0],
+        );
+        let bundle = render_svgs(&doc);
+        assert!(bundle.timing.contains(">after</text>"));
+        assert!(bundle.timing.contains(">5</text>"));
+    }
+
+    #[test]
+    fn event_only_timing_keeps_order_labels_and_dependency_anchors() {
+        let doc = examples::load_example("calibration").unwrap();
+        let options = render_timing::TimingOptions {
+            show_values: false,
+            ..Default::default()
+        };
+        let bundle = render_svgs_with(&doc, &options);
+        assert!(bundle.timing.contains(">#1</text>"));
+        assert!(bundle.timing.contains("solid: event flow"));
+        assert!(bundle.timing.contains("circle"));
+    }
+
+    #[test]
     fn focused_timing_embeds_the_execution_panel() {
         let doc = examples::load_example("accumulator").unwrap();
         let options = render_timing::TimingOptions {

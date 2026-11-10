@@ -274,6 +274,9 @@
 <text x="775.50" y="1019.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="11.50" fill="#181818" text-anchor="middle" dominant-baseline="central">15</text>
 <text x="920.50" y="1019.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="11.50" fill="#181818" text-anchor="middle" dominant-baseline="central">0</text>
 <text x="1059.50" y="1019.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="11.50" fill="#181818" text-anchor="middle" dominant-baseline="central">-6</text>
+<line x1="1138.00" y1="557.10" x2="1142.00" y2="557.10" stroke="#4a799e" stroke-width="1.00" stroke-linecap="round"/>
+<rect x="1142.00" y="548.10" width="26.00" height="18.00" rx="4.00" fill="#cfe6f5" stroke="#4a799e" stroke-width="1.20"/>
+<text x="1155.00" y="557.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="11.50" fill="#181818" text-anchor="middle" dominant-baseline="central">2</text>
 <line x1="1138.00" y1="887.10" x2="1142.00" y2="887.10" stroke="#4a799e" stroke-width="1.00" stroke-linecap="round"/>
 <rect x="1142.00" y="878.10" width="26.00" height="18.00" rx="4.00" fill="#cfe6f5" stroke="#4a799e" stroke-width="1.20"/>
 <text x="1155.00" y="887.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="11.50" fill="#181818" text-anchor="middle" dominant-baseline="central">5</text>
@@ -347,13 +350,13 @@
 <rect x="657.48" y="1174.55" width="65.81" height="35.51" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.30"/>
 <text x="690.39" y="1216.06" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.50" fill="#2d6cdf" text-anchor="middle" dominant-baseline="central">update</text>
 <text x="662.48" y="1175.55" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#1</text>
+<rect x="410.27" y="1149.51" width="65.81" height="35.51" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.20" stroke-dasharray="3.00 3.00"/>
+<text x="479.08" y="1167.27" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.50" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">snap!</text>
+<text x="415.27" y="1150.51" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
 <rect x="286.66" y="1146.96" width="31.26" height="15.57" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.30"/>
 <text x="291.66" y="1147.96" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#1</text>
 <rect x="533.88" y="1171.76" width="65.81" height="41.09" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.30"/>
 <text x="538.88" y="1172.76" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#3</text>
-<rect x="410.27" y="1149.51" width="65.81" height="35.51" rx="6.00" fill="rgba(0,0,0,0)" stroke="#2d6cdf" stroke-width="1.20" stroke-dasharray="3.00 3.00"/>
-<text x="479.08" y="1167.27" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.50" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">snap!</text>
-<text x="415.27" y="1150.51" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
 <line x1="558.00" y1="1098.10" x2="558.00" y2="1110.10" stroke="#b0b0b0" stroke-width="1.00" stroke-linecap="round" stroke-dasharray="3.00 4.00"/>
 </g>
 </svg>

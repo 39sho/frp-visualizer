@@ -128,17 +128,32 @@ pub fn render_timing(
             (x + gap).min(x1 - 1.0)
         })
         .collect();
+    let visible_events: HashSet<NodeId> = lanes
+        .iter()
+        .filter(|lane| lane.kind == PortType::Stream)
+        .map(|lane| lane.source)
+        .collect();
     let mut event_slots: HashMap<(NodeId, i64), EventSlot> = HashMap::new();
     for trace in &sim.traces {
         let start = tx_xs.get(trace.index).copied().unwrap_or(x0);
         let end = tx_xs.get(trace.index + 1).copied().unwrap_or(x1);
-        let count = trace.event_order.len();
-        for (order, id) in trace.event_order.iter().enumerate() {
-            let half_width = trace
-                .events
-                .get(id)
-                .map(|value| (text_width(&timing_label(value, 20), 12.0) + 13.0) / 2.0)
-                .unwrap_or(0.0);
+        let visible_order: Vec<NodeId> = trace
+            .event_order
+            .iter()
+            .copied()
+            .filter(|id| visible_events.contains(id))
+            .collect();
+        let count = visible_order.len();
+        for (order, id) in visible_order.iter().enumerate() {
+            let half_width = if options.show_values {
+                trace
+                    .events
+                    .get(id)
+                    .map(|value| (text_width(&timing_label(value, 20), 12.0) + 13.0) / 2.0)
+                    .unwrap_or(0.0)
+            } else {
+                0.0
+            };
             event_slots.insert(
                 (*id, time_key(trace.time)),
                 EventSlot {
@@ -557,6 +572,17 @@ fn draw_stream(
             .clamp(x0, x1 - 6.0);
         if !show_values {
             scene.circle([x, baseline], 2.8, INK, None);
+            if let Some(slot) = slot {
+                if slot.count > 1 {
+                    scene.text(
+                        [x, baseline - 9.0],
+                        format!("#{}", slot.order + 1),
+                        7.5,
+                        ACCENT,
+                        TextAnchor::Center,
+                    );
+                }
+            }
             continue;
         }
         let size = 12.0;
@@ -722,16 +748,6 @@ fn draw_final_cell_states(
         let Some(last) = sim.cell(lane.source).last() else {
             continue;
         };
-        let Some(transaction) = sim
-            .transactions
-            .iter()
-            .position(|time| (time - last.time).abs() < 1e-9)
-        else {
-            continue;
-        };
-        if transaction + 1 < sim.transactions.len() {
-            continue;
-        }
         let baseline = baselines[index];
         let label = timing_label(&last.value, 22);
         let size = 11.5;

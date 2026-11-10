@@ -26,7 +26,8 @@
 <text x="257.00" y="334.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="11.00" fill="#181818" text-anchor="start" dominant-baseline="central">each event is incremented by one</text>
 <text x="24.00" y="379.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="10.50" fill="#696969" text-anchor="start" dominant-baseline="central">TIMING</text>
 <text x="44.00" y="411.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="10.50" fill="#696969" text-anchor="start" dominant-baseline="central">transactions</text>
-<text x="44.00" y="426.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="9.50" fill="#b0b0b0" text-anchor="start" dominant-baseline="central">Tn start · cells update at Tn end</text>
+<text x="44.00" y="426.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="9.50" fill="#b0b0b0" text-anchor="start" dominant-baseline="central">Tn start · events in order · cell updates at Tn+1 boundary</text>
+<text x="1138.00" y="411.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="9.00" fill="#b0b0b0" text-anchor="end" dominant-baseline="central">solid: event flow · dashed: cell dependency</text>
 <line x1="485.50" y1="443.10" x2="485.50" y2="663.10" stroke="#b0b0b0" stroke-width="1.00" stroke-linecap="round" stroke-dasharray="3.00 4.00"/>
 <line x1="485.50" y1="443.10" x2="493.50" y2="443.10" stroke="#b0b0b0" stroke-width="0.90" stroke-linecap="round"/>
 <line x1="493.50" y1="443.10" x2="493.50" y2="447.10" stroke="#b0b0b0" stroke-width="0.90" stroke-linecap="round"/>
@@ -46,12 +47,6 @@
 <text x="236.00" y="472.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="9.50" fill="#696969" text-anchor="end" dominant-baseline="central">stream</text>
 <line x1="268.00" y1="484.10" x2="1138.00" y2="484.10" stroke="#181818" stroke-width="1.40" stroke-linecap="round"/>
 <path d="M1138.00,484.10 L1130.00,487.70 L1130.00,480.50 Z" fill="#181818"/>
-<rect x="475.64" y="474.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
-<text x="485.50" y="484.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">1</text>
-<rect x="693.14" y="474.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
-<text x="703.00" y="484.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">2</text>
-<rect x="910.64" y="474.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
-<text x="920.50" y="484.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">3</text>
 <rect x="24.00" y="517.10" width="1160.00" height="66.00" rx="0.00" fill="rgba(0,0,0,0.02745098)"/>
 <line x1="40.00" y1="583.10" x2="1168.00" y2="583.10" stroke="rgba(0,0,0,0.07058824)" stroke-width="1.00" stroke-linecap="round"/>
 <rect x="44.00" y="532.10" width="10.00" height="10.00" rx="2.00" fill="#f9f6b0" stroke="#181818" stroke-width="1.00"/>
@@ -59,24 +54,45 @@
 <text x="236.00" y="538.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="9.50" fill="#696969" text-anchor="end" dominant-baseline="central">stream</text>
 <line x1="268.00" y1="550.10" x2="1138.00" y2="550.10" stroke="#181818" stroke-width="1.40" stroke-linecap="round"/>
 <path d="M1138.00,550.10 L1130.00,553.70 L1130.00,546.50 Z" fill="#181818"/>
-<rect x="475.64" y="540.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
-<text x="485.50" y="550.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">2</text>
-<rect x="693.14" y="540.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
-<text x="703.00" y="550.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">3</text>
-<rect x="910.64" y="540.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
-<text x="920.50" y="550.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">4</text>
 <line x1="40.00" y1="649.10" x2="1168.00" y2="649.10" stroke="rgba(0,0,0,0.07058824)" stroke-width="1.00" stroke-linecap="round"/>
 <rect x="44.00" y="598.10" width="10.00" height="10.00" rx="2.00" fill="#f9f6b0" stroke="#181818" stroke-width="1.00"/>
 <text x="62.00" y="604.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="13.50" fill="#181818" text-anchor="start" dominant-baseline="central" font-weight="600">out</text>
 <text x="236.00" y="604.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="9.50" fill="#696969" text-anchor="end" dominant-baseline="central">stream</text>
 <line x1="268.00" y1="616.10" x2="1138.00" y2="616.10" stroke="#181818" stroke-width="1.40" stroke-linecap="round"/>
 <path d="M1138.00,616.10 L1130.00,619.70 L1130.00,612.50 Z" fill="#181818"/>
-<rect x="475.64" y="606.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
-<text x="485.50" y="616.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">2</text>
-<rect x="693.14" y="606.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
-<text x="703.00" y="616.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">3</text>
-<rect x="910.64" y="606.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
-<text x="920.50" y="616.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">4</text>
+<path d="M514.76,484.10 L571.85,484.10 L573.38,484.24 L574.63,484.66 L575.60,485.35 L576.29,486.32 L576.71,487.57 L576.85,489.10 L576.85,489.10 L576.85,545.10 L576.99,546.63 L577.41,547.88 L578.10,548.85 L579.07,549.54 L580.32,549.96 L581.85,550.10 L581.85,550.10 L638.94,550.10" fill="none" stroke="rgba(45,108,223,0.5686275)" stroke-width="1.10" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M638.94,550.10 L633.94,552.35 L633.94,547.85 Z" fill="rgba(45,108,223,0.5686275)"/>
+<path d="M732.26,484.10 L789.35,484.10 L790.88,484.24 L792.13,484.66 L793.10,485.35 L793.79,486.32 L794.21,487.57 L794.35,489.10 L794.35,489.10 L794.35,545.10 L794.49,546.63 L794.91,547.88 L795.60,548.85 L796.57,549.54 L797.82,549.96 L799.35,550.10 L799.35,550.10 L856.44,550.10" fill="none" stroke="rgba(45,108,223,0.5686275)" stroke-width="1.10" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M856.44,550.10 L851.44,552.35 L851.44,547.85 Z" fill="rgba(45,108,223,0.5686275)"/>
+<path d="M949.76,484.10 L1006.85,484.10 L1008.38,484.24 L1009.63,484.66 L1010.60,485.35 L1011.29,486.32 L1011.71,487.57 L1011.85,489.10 L1011.85,489.10 L1011.85,545.10 L1011.99,546.63 L1012.41,547.88 L1013.10,548.85 L1014.07,549.54 L1015.32,549.96 L1016.85,550.10 L1016.85,550.10 L1073.94,550.10" fill="none" stroke="rgba(45,108,223,0.5686275)" stroke-width="1.10" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M1073.94,550.10 L1068.94,552.35 L1068.94,547.85 Z" fill="rgba(45,108,223,0.5686275)"/>
+<rect x="493.04" y="474.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
+<text x="502.90" y="484.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">1</text>
+<text x="497.04" y="469.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#1</text>
+<rect x="710.54" y="474.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
+<text x="720.40" y="484.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">2</text>
+<text x="714.54" y="469.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#1</text>
+<rect x="928.04" y="474.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
+<text x="937.90" y="484.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">3</text>
+<text x="932.04" y="469.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#1</text>
+<rect x="640.94" y="540.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
+<text x="650.80" y="550.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">2</text>
+<text x="644.94" y="535.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
+<rect x="858.44" y="540.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
+<text x="868.30" y="550.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">3</text>
+<text x="862.44" y="535.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
+<rect x="1075.94" y="540.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
+<text x="1085.80" y="550.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">4</text>
+<text x="1079.94" y="535.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
+<rect x="640.94" y="606.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
+<text x="650.80" y="616.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">2</text>
+<text x="644.94" y="601.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
+<rect x="858.44" y="606.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
+<text x="868.30" y="616.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">3</text>
+<text x="862.44" y="601.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
+<rect x="1075.94" y="606.10" width="19.72" height="20.00" rx="4.00" fill="#ffffff" stroke="#181818" stroke-width="1.10"/>
+<text x="1085.80" y="616.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="12.00" fill="#181818" text-anchor="middle" dominant-baseline="central">4</text>
+<text x="1079.94" y="601.10" font-family="Helvetica, Arial, 'Noto Sans JP', sans-serif" font-size="8.00" fill="#2d6cdf" text-anchor="start" dominant-baseline="central">#2</text>
 <line x1="268.00" y1="669.10" x2="1138.00" y2="669.10" stroke="#181818" stroke-width="1.30" stroke-linecap="round"/>
 <path d="M1138.00,669.10 L1130.00,672.70 L1130.00,665.50 Z" fill="#181818"/>
 <line x1="268.00" y1="665.10" x2="268.00" y2="673.10" stroke="#181818" stroke-width="1.00" stroke-linecap="round"/>
