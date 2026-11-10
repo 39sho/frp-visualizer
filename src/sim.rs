@@ -1567,9 +1567,7 @@ mod tests {
         assert_eq!(values, vec!["1", "20", "3"]);
 
         let report = validate_document(&doc);
-        assert!(!report
-            .errors
-            .iter()
-            .any(|error| error.contains("Simultaneous")));
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     }
 }

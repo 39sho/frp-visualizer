@@ -283,7 +283,7 @@ frp-visualizer render examples/structural.frp structural-out --output network
 - エッジラベルは `\n` で改行でき、`label @ 240` で幅を指定（JSON では `label_width`）
 - Component は定義を先に書き、その後にインスタンスを配置
 
-`merge` は同時発火時に警告を出して左のイベントを採用します。警告なしで左優先のマージにしたい場合は `orElse`（または `or_else`）を使います。どちらも入力ポートは `.left` / `.right` です。
+`merge` は同時発火時に警告を出して左のイベントを採用します。executable mode の検証ではこの警告がエラーになるため、`check` / `render` は通りません。警告なしで左優先のマージにしたい場合は `orElse`（または `or_else`）を使います。どちらも入力ポートは `.left` / `.right` です。
 
 `mode structural` と `display` を使うと、実行意味論を持たない構造スケッチを描けます。値は timing に出ません。
 
