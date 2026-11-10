@@ -13,8 +13,8 @@ const LABEL_W: f32 = 220.0;
 const HEADER_H: f32 = 58.0;
 const ROW_H: f32 = 66.0;
 const FOOTER_H: f32 = 52.0;
-const EVENT_FIRST_FRAC: f32 = 0.14;
-const EVENT_LAST_FRAC: f32 = 0.62;
+const EVENT_FIRST_FRAC: f32 = 0.08;
+const EVENT_LAST_FRAC: f32 = 0.76;
 
 #[derive(Clone, Copy, Debug)]
 struct EventSlot {
@@ -766,11 +766,10 @@ fn draw_dependencies(scene: &mut Scene, context: &DependencyContext<'_>) {
     let baselines = context.baselines;
     let tx_xs = context.tx_xs;
     let x1 = context.x1;
-    let lane_by_id: HashMap<NodeId, usize> = lanes
-        .iter()
-        .enumerate()
-        .map(|(index, lane)| (lane.source, index))
-        .collect();
+    let mut lane_by_id: HashMap<NodeId, usize> = HashMap::new();
+    for (index, lane) in lanes.iter().enumerate() {
+        lane_by_id.entry(lane.source).or_insert(index);
+    }
     let event_color = crate::scene::Color(45, 108, 223, 145);
     let cell_color = crate::scene::Color(74, 121, 158, 125);
 
