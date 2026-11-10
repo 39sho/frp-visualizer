@@ -384,7 +384,13 @@ impl SegmentIndex {
 
     fn nearby_into(&self, a: [f32; 2], b: [f32; 2], ids: &mut Vec<usize>) {
         ids.clear();
-        let generation = self.generation.get().wrapping_add(1);
+        let next = self.generation.get().wrapping_add(1);
+        let generation = if next == 0 {
+            self.seen.borrow_mut().fill(0);
+            1
+        } else {
+            next
+        };
         self.generation.set(generation);
         let mut seen = self.seen.borrow_mut();
         if seen.len() < self.segments.len() {
@@ -2626,6 +2632,8 @@ s -> c
             vec![[300.0, 0.0], [300.0, 250.0]],
             vec![[100.0, 50.0], [100.0, 250.0]],
             vec![[180.0, 220.0], [420.0, 220.0]],
+            vec![[-160.0, -120.0], [-20.0, -120.0], [-20.0, 40.0]],
+            vec![[-180.0, -140.0], [280.0, 360.0]],
         ];
         let index = SegmentIndex::new(&routes);
         let edge_start = [0.0, 0.0];
@@ -2649,23 +2657,50 @@ s -> c
             }
             penalty
         };
+        let check = |a: [f32; 2], b: [f32; 2]| {
+            assert_eq!(
+                parallel_conflict(a, b, &routes, edge_start, edge_end),
+                parallel_conflict_indexed(a, b, &index, edge_start, edge_end),
+                "parallel mismatch at {a:?}-{b:?}"
+            );
+            assert_eq!(
+                scan_crossing(a, b),
+                crossing_penalty_indexed(a, b, &index, edge_start, edge_end),
+                "crossing mismatch at {a:?}-{b:?}"
+            );
+        };
 
         for x in (0..520).step_by(17) {
             for y in (0..360).step_by(19) {
                 let fx = x as f32;
                 let fy = y as f32;
                 for (a, b) in [([fx, fy], [fx + 45.0, fy]), ([fx, fy], [fx, fy + 45.0])] {
-                    assert_eq!(
-                        parallel_conflict(a, b, &routes, edge_start, edge_end),
-                        parallel_conflict_indexed(a, b, &index, edge_start, edge_end),
-                        "parallel mismatch at {a:?}-{b:?}"
-                    );
-                    assert_eq!(
-                        scan_crossing(a, b),
-                        crossing_penalty_indexed(a, b, &index, edge_start, edge_end),
-                        "crossing mismatch at {a:?}-{b:?}"
-                    );
+                    check(a, b);
                 }
+            }
+        }
+
+        // Negative coordinates, cell boundaries and clearance boundaries.
+        for x in (-192..512).step_by(13) {
+            for y in (-128..384).step_by(17) {
+                let fx = x as f32;
+                let fy = y as f32;
+                for (a, b) in [([fx, fy], [fx + 37.0, fy]), ([fx, fy], [fx, fy + 37.0])] {
+                    check(a, b);
+                }
+            }
+        }
+        for value in [-128.0, -64.0, -12.0, 0.0, 12.0, 64.0, 128.0, 256.0, 320.0] {
+            for offset in [
+                -EDGE_CLEARANCE - 0.5,
+                -EDGE_CLEARANCE + 0.5,
+                EDGE_CLEARANCE - 0.5,
+                EDGE_CLEARANCE + 0.5,
+            ] {
+                check([value, 100.0], [value, 180.0]);
+                check([value + offset, 100.0], [value + offset, 180.0]);
+                check([100.0, value], [180.0, value]);
+                check([100.0, value + offset], [180.0, value + offset]);
             }
         }
     }
