@@ -225,6 +225,8 @@ frp-visualizer render examples/component.frp out --timing-scope all --timing-val
 
 `--timing-values none` は値を出さず、イベントの発火時刻と件数だけを表示します。`--focus-transaction N` と組み合わせると、その Transaction で active なノードと接続だけを timing 内のインセットに表示します。値・副作用の計算は行いません。
 
+Timeline の stream event は Transaction 内の発火順に左から右へ配置され、`#1`, `#2`, … がその順序です。セルはイベント列の後に更新され、新しい値は次の Transaction の位置で確認できます。
+
 `render` は検証エラーがある文書を書き出しません。`check --strict` と併用してください。`trace.json` には `timing_reliable` / `values_reliable`、Transaction ごとの events / event_order / cell updates / update_order、lane ごとの event/step が入ります。
 
 ### Execution focus

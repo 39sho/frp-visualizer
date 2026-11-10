@@ -7,12 +7,29 @@ use crate::scene::{
     YELLOW,
 };
 use crate::sim::{SimStep, Simulation, TransactionTrace};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 const LABEL_W: f32 = 220.0;
 const HEADER_H: f32 = 58.0;
 const ROW_H: f32 = 66.0;
 const FOOTER_H: f32 = 52.0;
+const EVENT_FIRST_FRAC: f32 = 0.14;
+const EVENT_LAST_FRAC: f32 = 0.62;
+const CELL_UPDATE_FRAC: f32 = 0.74;
+
+#[derive(Clone, Copy, Debug)]
+struct EventSlot {
+    x: f32,
+    order: usize,
+    count: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LaneGeometry {
+    x0: f32,
+    x1: f32,
+    baseline: f32,
+}
 
 #[derive(Clone, Debug)]
 pub struct TimingView {
@@ -101,18 +118,38 @@ pub fn render_timing(
             (x + gap).min(x1 - 1.0)
         })
         .collect();
-    let transaction_end = |time: f64| -> f32 {
+    let mut event_slots: HashMap<(NodeId, i64), EventSlot> = HashMap::new();
+    for trace in &sim.traces {
+        let start = tx_xs.get(trace.index).copied().unwrap_or(x0);
+        let end = tx_xs.get(trace.index + 1).copied().unwrap_or(x1);
+        let count = trace.event_order.len();
+        for (order, id) in trace.event_order.iter().enumerate() {
+            event_slots.insert(
+                (*id, time_key(trace.time)),
+                EventSlot {
+                    x: event_slot_x(start, end, order, count),
+                    order,
+                    count,
+                },
+            );
+        }
+    }
+    let transaction_update = |time: f64| -> f32 {
         sim.transactions
             .iter()
             .position(|t| (t - time).abs() < 1e-9)
-            .and_then(|index| tx_ends.get(index).copied())
+            .map(|index| {
+                let start = tx_xs.get(index).copied().unwrap_or(x0);
+                let end = tx_xs.get(index + 1).copied().unwrap_or(x1);
+                cell_update_x(start, end)
+            })
             .unwrap_or_else(|| map_x(time))
     };
 
     scene.text([20.0, 18.0], "transactions", 10.5, MUTED, TextAnchor::Start);
     scene.text(
         [20.0, 33.0],
-        "Tn start · cells update at Tn end",
+        "Tn start · events in order · cells update at Tn end",
         9.5,
         FAINT,
         TextAnchor::Start,
@@ -207,16 +244,16 @@ pub fn render_timing(
                 x0,
                 x1,
                 baseline,
-                transaction_end,
+                transaction_update,
                 options.show_values,
             );
         } else {
             draw_stream(
                 &mut scene,
+                lane.source,
                 sim.stream(lane.source),
-                x0,
-                x1,
-                baseline,
+                &event_slots,
+                LaneGeometry { x0, x1, baseline },
                 map_x,
                 options.show_values,
             );
@@ -442,13 +479,14 @@ fn build_focus_network(doc: &Document, trace: &TransactionTrace) -> Option<Focus
 
 fn draw_stream(
     scene: &mut Scene,
+    source: NodeId,
     events: &[crate::sim::SimEvent],
-    x0: f32,
-    x1: f32,
-    baseline: f32,
+    event_slots: &HashMap<(NodeId, i64), EventSlot>,
+    geometry: LaneGeometry,
     map_x: impl Fn(f64) -> f32,
     show_values: bool,
 ) {
+    let LaneGeometry { x0, x1, baseline } = geometry;
     if events.is_empty() {
         scene.text(
             [x0 + 8.0, baseline - 13.0],
@@ -461,7 +499,11 @@ fn draw_stream(
     }
     let mut levels: Vec<Vec<(f32, f32)>> = vec![Vec::new(); 4];
     for ev in events {
-        let x = map_x(ev.time).clamp(x0, x1 - 6.0);
+        let slot = event_slots.get(&(source, time_key(ev.time))).copied();
+        let x = slot
+            .map(|slot| slot.x)
+            .unwrap_or_else(|| map_x(ev.time))
+            .clamp(x0, x1 - 6.0);
         if !show_values {
             scene.circle([x, baseline], 2.8, INK, None);
             continue;
@@ -511,6 +553,17 @@ fn draw_stream(
         }
         scene.rect(box_rect, 4.0, WHITE, Some(Stroke::new(INK, 1.1)));
         scene.text([x, box_center_y], label, size, INK, TextAnchor::Center);
+        if let Some(slot) = slot {
+            if slot.count > 1 {
+                scene.text(
+                    [left + 4.0, box_rect.y - 5.0],
+                    format!("#{}", slot.order + 1),
+                    8.0,
+                    ACCENT,
+                    TextAnchor::Start,
+                );
+            }
+        }
     }
 }
 
@@ -520,7 +573,7 @@ fn draw_cell(
     x0: f32,
     x1: f32,
     baseline: f32,
-    transaction_end: impl Fn(f64) -> f32,
+    cell_update_x: impl Fn(f64) -> f32,
     show_values: bool,
 ) {
     if steps.is_empty() {
@@ -533,7 +586,7 @@ fn draw_cell(
         );
         return;
     }
-    let band_end = (x1 - 26.0).max(x0 + 24.0);
+    let band_end = (x1 - 12.0).max(x0 + 24.0);
     let top = baseline - 9.0;
     let bottom = baseline + 9.0;
     let slant = 6.0;
@@ -556,7 +609,7 @@ fn draw_cell(
             if index == 0 {
                 x0
             } else {
-                transaction_end(step.time).clamp(x0, band_end)
+                cell_update_x(step.time).clamp(x0, band_end)
             }
         })
         .collect();
@@ -599,6 +652,24 @@ fn draw_cell(
     }
 }
 
+fn event_slot_x(start: f32, end: f32, order: usize, count: usize) -> f32 {
+    let span = (end - start).max(1.0);
+    let fraction = if count <= 1 {
+        EVENT_FIRST_FRAC
+    } else {
+        EVENT_FIRST_FRAC + (EVENT_LAST_FRAC - EVENT_FIRST_FRAC) * order as f32 / (count - 1) as f32
+    };
+    start + span * fraction
+}
+
+fn cell_update_x(start: f32, end: f32) -> f32 {
+    start + (end - start).max(1.0) * CELL_UPDATE_FRAC
+}
+
+fn time_key(time: f64) -> i64 {
+    (time * 1_000_000.0).round() as i64
+}
+
 fn truncate(text: &str, width: f32, size: f32) -> String {
     crate::model::fit_text(text, width, size)
 }
@@ -607,5 +678,27 @@ fn timing_label(value: &crate::model::Value, max: usize) -> String {
     match value {
         crate::model::Value::Unit => "unit".into(),
         other => other.short(max),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_slots_follow_the_causal_order() {
+        let xs: Vec<f32> = (0..3)
+            .map(|order| event_slot_x(100.0, 200.0, order, 3))
+            .collect();
+        assert!(xs.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(xs[0] > 100.0);
+        assert!(xs[2] < cell_update_x(100.0, 200.0));
+    }
+
+    #[test]
+    fn cell_updates_happen_after_the_event_sequence() {
+        let update = cell_update_x(100.0, 200.0);
+        assert!(update > event_slot_x(100.0, 200.0, 9, 10));
+        assert!(update < 200.0);
     }
 }
