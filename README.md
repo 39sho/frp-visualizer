@@ -11,7 +11,7 @@ FRP（Functional Reactive Programming）の **Stream / Cell ネットワーク�
 
 ## Features
 
-- `map` / `filter` / `merge` / `snapshot` / `hold` / `lift` などの FRP プリミティブ
+- `map` / `filter` / `merge` / `orElse` / `snapshot` / `hold` / `lift` などの FRP プリミティブ
 - Stream と Cell の型付きポート、離散トランザクションによるシミュレーション
 - `network.svg` / `timing.svg` / `diagram.svg` / `diagram.json` の出力
 - **orthogonal 配線**（デフォルト）と `--route hybrid` の斜め配線
@@ -136,6 +136,7 @@ frp-visualizer render-example <name> [out_dir] [options]
 | `map_filter` | Stream の map と filter |
 | `snapshot` | Cell のサンプリング |
 | `merge` | 2 本の Stream のマージ |
+| `or_else` | 同時発火時に左を優先する Stream のマージ |
 | `lift` | Cell 同士の合成 |
 | `calibration` | クリア・スケーリング付き累積器 |
 | `component` | Component 雲と多出力、内部状態 |
@@ -276,7 +277,7 @@ frp-visualizer render examples/structural.frp structural-out --output network
 ```
 
 - `layout auto` / `layout manual`、ノードごとの `at x,y` に対応。auto layout は Sink を最右列に置き、入力側の重心に合わせて配置するため、大きな図でも `out` への配線が戻りにくい
-- `stream` / `cell` / `map` / `filter` / `merge` / `snapshot` / `hold` / `lift` / `never` / `sink`
+- `stream` / `cell` / `map` / `filter` / `merge` / `orElse` / `snapshot` / `hold` / `lift` / `never` / `sink`
 - `component <name> { ... }` で Component を定義し、`component <instance> = <definition>` で配置
 - `import "path/to/component.frp"` で別ファイルの Component 定義を読み込み、現在のファイルから参照可能にする
 - `import` はファイル先頭（コメント・空行を除く）に置く。パスはそのファイルからの相対パス
@@ -287,6 +288,8 @@ frp-visualizer render examples/structural.frp structural-out --output network
 - `map update = display "SetReferenceMapPoints"` のように表示専用の処理名を指定
 - エッジラベルは `\n` で改行でき、`label @ 240` で幅を指定（JSON では `label_width`）
 - Component は定義を先に書き、その後にインスタンスを配置
+
+`merge` は同時発火時に警告を出して左のイベントを採用します。executable mode の検証ではこの警告がエラーになるため、`check` / `render` は通りません。警告なしで左優先のマージにしたい場合は `orElse`（または `or_else`）を使います。どちらも入力ポートは `.left` / `.right` です。
 
 `mode structural` と `display` を使うと、実行意味論を持たない構造スケッチを描けます。値は timing に出ません。
 

@@ -143,6 +143,7 @@ fn node_label_rect(node: &crate::model::Node, rect: Rect) -> Option<Rect> {
         NodeKind::Map { .. }
         | NodeKind::Filter { .. }
         | NodeKind::Merge
+        | NodeKind::OrElse
         | NodeKind::Snapshot { .. }
         | NodeKind::Lift { .. }
         | NodeKind::Never => (node.kind.primitive(), rect.center()[0]),

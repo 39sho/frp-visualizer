@@ -396,6 +396,7 @@ pub enum NodeKind {
         op: FilterOp,
     },
     Merge,
+    OrElse,
     Snapshot {
         #[serde(default)]
         op: CombineOp,
@@ -430,6 +431,7 @@ impl NodeKind {
             Self::Map { .. } => "map",
             Self::Filter { .. } => "filter",
             Self::Merge => "merge",
+            Self::OrElse => "orElse",
             Self::Snapshot { .. } => "snapshot",
             Self::Hold { .. } => "hold",
             Self::Lift { .. } => "lift",
@@ -450,6 +452,7 @@ impl NodeKind {
                 | Self::Map { .. }
                 | Self::Filter { .. }
                 | Self::Merge
+                | Self::OrElse
                 | Self::Snapshot { .. }
                 | Self::Never
         )
@@ -488,7 +491,7 @@ impl NodeKind {
             Self::Map { .. } | Self::Filter { .. } | Self::Hold { .. } => {
                 vec![PortType::Stream]
             }
-            Self::Merge => vec![PortType::Stream, PortType::Stream],
+            Self::Merge | Self::OrElse => vec![PortType::Stream, PortType::Stream],
             Self::Snapshot { .. } => vec![PortType::Stream, PortType::Cell],
             Self::Lift { .. } => vec![PortType::Cell, PortType::Cell],
             Self::Sink => vec![PortType::Any],
@@ -501,8 +504,8 @@ impl NodeKind {
         match (self, index) {
             (Self::Snapshot { .. }, 0) => "event",
             (Self::Snapshot { .. }, 1) => "cell",
-            (Self::Merge, 0) => "left",
-            (Self::Merge, 1) => "right",
+            (Self::Merge | Self::OrElse, 0) => "left",
+            (Self::Merge | Self::OrElse, 1) => "right",
             (Self::Lift { .. }, 0) => "a",
             (Self::Lift { .. }, 1) => "b",
             (Self::Component { inputs, .. }, index) => inputs
@@ -529,7 +532,7 @@ impl NodeKind {
             Self::InputCell { initial, .. } => format!("= {}", initial.short(14)),
             Self::Map { op } => op.label(),
             Self::Filter { op } => op.label(),
-            Self::Merge => String::new(),
+            Self::Merge | Self::OrElse => String::new(),
             Self::Snapshot { op } | Self::Lift { op } => op.symbol().to_string(),
             Self::Hold { initial } => initial.short(14),
             Self::Never => String::new(),
@@ -575,7 +578,7 @@ impl Node {
                 let width = (text_width(name, 13.5) + 18.0).clamp(36.0, 280.0);
                 [width, 24.0]
             }
-            NodeKind::Merge => [150.0, 88.0],
+            NodeKind::Merge | NodeKind::OrElse => [150.0, 88.0],
             NodeKind::Component {
                 inputs,
                 outputs,

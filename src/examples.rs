@@ -8,6 +8,7 @@ pub const EXAMPLES: &[(&str, &str)] = &[
     ("Map & filter", "map_filter"),
     ("Snapshot", "snapshot"),
     ("Merge", "merge"),
+    ("OrElse", "or_else"),
     ("Lift cells", "lift"),
     ("Calibration", "calibration"),
     ("Component", "component"),
@@ -20,6 +21,7 @@ pub fn load_example(name: &str) -> Option<Document> {
         "map_filter" | "Map & filter" => Some(map_filter()),
         "snapshot" | "Snapshot" => Some(snapshot()),
         "merge" | "Merge" => Some(merge()),
+        "or_else" | "OrElse" | "orElse" => Some(or_else()),
         "lift" | "Lift cells" => Some(lift()),
         "calibration" | "Calibration" => Some(calibration()),
         "component" | "Component" => Some(component()),
@@ -229,6 +231,50 @@ fn merge() -> Document {
     doc.add_edge(right, merge, 1).unwrap();
     doc.add_edge(merge, sink, 0).unwrap();
     doc.time_end = 7.0;
+    doc
+}
+
+fn or_else() -> Document {
+    let mut doc = Document::blank();
+    doc.title = "OrElse — left-biased merge".into();
+    let left = add(
+        &mut doc,
+        NodeKind::InputEvent {
+            events: vec![
+                TimedValue::new(1.0, Value::Number(1.0)),
+                TimedValue::new(3.0, Value::Number(3.0)),
+                TimedValue::new(5.0, Value::Number(5.0)),
+            ],
+        },
+        "sLeft",
+        "left input",
+        [40.0, 40.0],
+    );
+    let right = add(
+        &mut doc,
+        NodeKind::InputEvent {
+            events: vec![
+                TimedValue::new(2.0, Value::Number(20.0)),
+                TimedValue::new(3.0, Value::Number(30.0)),
+                TimedValue::new(4.0, Value::Number(40.0)),
+            ],
+        },
+        "sRight",
+        "right input",
+        [40.0, 220.0],
+    );
+    let or_else = add(&mut doc, NodeKind::OrElse, "orElse", "", [310.0, 130.0]);
+    let sink = add(
+        &mut doc,
+        NodeKind::Sink,
+        "sChange",
+        "output",
+        [560.0, 126.0],
+    );
+    doc.add_edge(left, or_else, 0).unwrap();
+    doc.add_edge(right, or_else, 1).unwrap();
+    doc.add_edge(or_else, sink, 0).unwrap();
+    doc.time_end = 6.0;
     doc
 }
 

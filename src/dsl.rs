@@ -461,6 +461,12 @@ impl Parser {
                 }
                 NodeKind::Merge
             }
+            "orElse" | "or_else" => {
+                if !tail.is_empty() {
+                    return Err("orElse does not take a value".into());
+                }
+                NodeKind::OrElse
+            }
             "never" => {
                 if !tail.is_empty() {
                     return Err("never does not take a value".into());
@@ -788,10 +794,12 @@ fn resolve_port(doc: &Document, spec: &str, target: bool) -> Result<(NodeId, usi
                 index
             } else if target {
                 match &node.kind {
-                    NodeKind::Merge => match port {
+                    NodeKind::Merge | NodeKind::OrElse => match port {
                         "left" => 0,
                         "right" => 1,
-                        _ => return Err(format!("unknown merge port '{port}'")),
+                        _ => {
+                            return Err(format!("unknown {} port '{port}'", node.kind.primitive()))
+                        }
                     },
                     NodeKind::Snapshot { .. } => match port {
                         "event" => 0,
@@ -1096,6 +1104,36 @@ mod tests {
         let edge = parsed.doc.edges.first().unwrap();
         assert_eq!(edge.label, "first\nsecond");
         assert_eq!(edge.label_width, Some(80.0));
+    }
+
+    #[test]
+    fn parses_or_else_and_prefers_left() {
+        let parsed = parse(
+            "stream a events 1:1, 3:3\nstream b events 1:2, 2:20\norElse merged\nsink out\na -> merged.left\nb -> merged.right\nmerged -> out\n",
+        )
+        .unwrap();
+        let id = parsed
+            .doc
+            .nodes
+            .iter()
+            .find(|node| node.name == "merged")
+            .unwrap()
+            .id;
+        assert!(matches!(
+            parsed.doc.node(id).unwrap().kind,
+            NodeKind::OrElse
+        ));
+        assert_eq!(stream_values(&parsed.doc, "merged"), vec!["1", "20", "3"]);
+
+        let alias = parse("stream a\nor_else merged\n").unwrap();
+        let id = alias
+            .doc
+            .nodes
+            .iter()
+            .find(|node| node.name == "merged")
+            .unwrap()
+            .id;
+        assert!(matches!(alias.doc.node(id).unwrap().kind, NodeKind::OrElse));
     }
 
     #[test]

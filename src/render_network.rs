@@ -137,7 +137,7 @@ fn draw_node(scene: &mut Scene, doc: &Document, id: NodeId, rect: Rect) {
             draw_chevron(scene, rect, BLUE, shape_stroke);
             draw_op_text(scene, node, rect, true);
         }
-        NodeKind::Merge => {
+        NodeKind::Merge | NodeKind::OrElse => {
             let points = vec![
                 [rect.x, rect.y],
                 [rect.right(), rect.y + rect.h * 0.24],
@@ -196,7 +196,7 @@ fn draw_node(scene: &mut Scene, doc: &Document, id: NodeId, rect: Rect) {
     for port in 0..inputs.len() {
         let center = crate::layout::input_port_pos(node, rect, port);
         let label = node.kind.port_label(port);
-        if label.is_empty() || matches!(node.kind, NodeKind::Merge) {
+        if label.is_empty() || matches!(node.kind, NodeKind::Merge | NodeKind::OrElse) {
             continue;
         }
         let (pos, anchor) = match (&node.kind, port) {
