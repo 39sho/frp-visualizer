@@ -9,6 +9,18 @@ use crate::scene::{
 pub fn render_network(doc: &Document, layout: &NetworkLayout) -> Scene {
     let mut scene = Scene::new();
 
+    // Component clouds sit behind the wires so a wire that grazes a cloud
+    // lobe (or an arrow at a cloud port) is never swallowed by the fill.
+    for node in &doc.nodes {
+        if !node.kind.is_component() {
+            continue;
+        }
+        let Some(rect) = layout.node_rects.get(&node.id).copied() else {
+            continue;
+        };
+        scene.cloud(rect, WHITE, Stroke::new(INK, 1.6));
+    }
+
     for edge in &doc.edges {
         let Some(route) = layout.edge_routes.get(&edge.id) else {
             continue;
@@ -24,6 +36,9 @@ pub fn render_network(doc: &Document, layout: &NetworkLayout) -> Scene {
             Stroke::new(color, 1.55)
         };
         scene.polyline(route.points.clone(), stroke);
+        if let Some(junction) = route.junction {
+            scene.circle(junction, 2.6, color, None);
+        }
         let tip = edge_tip(route);
         let dir = edge_direction(route);
         let head = arrow_head(tip, dir, 9.0);
@@ -170,7 +185,6 @@ fn draw_node(scene: &mut Scene, doc: &Document, id: NodeId, rect: Rect) {
             draw_op_text(scene, node, rect, false);
         }
         NodeKind::Component { body, .. } => {
-            scene.cloud(rect, WHITE, shape_stroke);
             let body_count = body.len() as f32;
             let name_y = rect.center()[1] - body_count * 7.0;
             scene.text(

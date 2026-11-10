@@ -16,6 +16,8 @@ FRP（Functional Reactive Programming）の **Stream / Cell ネットワーク�
 - `network.svg` / `timing.svg` / `diagram.svg` / `diagram.json` の出力
 - **orthogonal 配線**（デフォルト）と `--route hybrid` の斜め配線
 - ノードとラベルを避けるルーティング、直交配線の交差ペナルティ、平行線の分離、交差部のホップ
+- 3本以上に分岐する配線は共通トランクにまとめ、分岐点マーカーで追いやすく表示
+- Component 雲は配線の背面に描画し、雲のふくらみも避けるクリアランスで線・矢印が隠れないように配線
 - **port-aware auto layout**（直列ノードを入出力ポートの高さに揃え、Sink も入力元に追従）
 - Cell を帯で示すタイミング図、トランザクション開始／終了ティック
 - **Component 雲**（入出力ポート・多出力・内部ネットワークの展開表示・内部状態を含むシミュレーション）
