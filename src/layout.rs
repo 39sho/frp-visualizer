@@ -249,6 +249,7 @@ fn fanout_trunk(
         let x = base_x + step as f32 * 8.0;
         if segment_clear([port[0], port[1]], [x, port[1]], obstacles)
             && segment_clear([x, min_lane], [x, max_lane], obstacles)
+            && fanout_stubs_clear(x, lanes, obstacles)
         {
             return Some((x, port[1]));
         }
@@ -258,7 +259,9 @@ fn fanout_trunk(
     // then run the trunk above/below the obstruction.
     for step in 0..48 {
         let x = base_x + step as f32 * 8.0;
-        if !segment_clear([x, min_lane], [x, max_lane], obstacles) {
+        if !segment_clear([x, min_lane], [x, max_lane], obstacles)
+            || !fanout_stubs_clear(x, lanes, obstacles)
+        {
             continue;
         }
         let mut candidates = vec![port[1]];
@@ -291,6 +294,13 @@ fn fanout_trunk(
         }
     }
     None
+}
+
+fn fanout_stubs_clear(fork_x: f32, lanes: &[f32], obstacles: &[Rect]) -> bool {
+    const START_STUB: f32 = 14.0;
+    lanes
+        .iter()
+        .all(|lane| segment_clear([fork_x, *lane], [fork_x + START_STUB, *lane], obstacles))
 }
 
 fn fanout_lanes(desired: &[f32]) -> Vec<f32> {
@@ -1895,24 +1905,20 @@ mod tests {
         sin < 0.25 && segment_distance(a, b, c, d) < EDGE_CLEARANCE - 0.5
     }
 
-    fn fanout_branch_start(doc: &Document, edge: &Edge, route: &EdgeRoute) -> usize {
+    fn fanout_fork_index(doc: &Document, edge: &Edge, route: &EdgeRoute) -> Option<usize> {
         let fanout_edges = doc
             .edges
             .iter()
             .filter(|other| other.from == edge.from && other.from_port == edge.from_port)
             .count();
         if fanout_edges < 3 {
-            return 0;
+            return None;
         }
-        let Some(fork) = route.fork else {
-            return 0;
-        };
+        let fork = route.fork?;
         route
             .points
             .iter()
-            .rposition(|point| same_point(*point, fork))
-            .map(|index| index + 1)
-            .unwrap_or(0)
+            .position(|point| same_point(*point, fork))
     }
 
     fn check_routes(key: &str, doc: &Document, network: &NetworkLayout) {
@@ -1922,12 +1928,29 @@ mod tests {
             for j in i + 1..routes.len() {
                 let a_edge = doc.edge(*routes[i].0);
                 let b_edge = doc.edge(*routes[j].0);
-                let a_start = a_edge
-                    .map(|edge| fanout_branch_start(doc, edge, routes[i].1))
-                    .unwrap_or(0);
-                let b_start = b_edge
-                    .map(|edge| fanout_branch_start(doc, edge, routes[j].1))
-                    .unwrap_or(0);
+                let same_fanout_group = match (a_edge, b_edge) {
+                    (Some(a), Some(b)) => {
+                        let count = doc
+                            .edges
+                            .iter()
+                            .filter(|other| other.from == a.from && other.from_port == a.from_port)
+                            .count();
+                        a.from == b.from && a.from_port == b.from_port && count >= 3
+                    }
+                    _ => false,
+                };
+                let (a_start, b_start) = if same_fanout_group {
+                    (
+                        a_edge
+                            .and_then(|edge| fanout_fork_index(doc, edge, routes[i].1))
+                            .unwrap_or(0),
+                        b_edge
+                            .and_then(|edge| fanout_fork_index(doc, edge, routes[j].1))
+                            .unwrap_or(0),
+                    )
+                } else {
+                    (0, 0)
+                };
                 let a_segments = trimmed_segments(&routes[i].1.points[a_start..]);
                 let b_segments = trimmed_segments(&routes[j].1.points[b_start..]);
                 for &(a, b) in &a_segments {
@@ -2416,6 +2439,48 @@ s -> out
                 "a distant node shrank the cloud clearance: {:?}",
                 route.points
             );
+        }
+    }
+
+    #[test]
+    fn fanout_branch_stubs_do_not_enter_a_blocker() {
+        let source = "\
+diagram Fan out blocker at fork
+layout manual
+time_end 2
+
+stream s events 1:1 at 40,200
+map blocker = identity at 130,180
+sink a at 500,100
+sink b at 500,200
+sink c at 500,400
+
+s -> a
+s -> b
+s -> c
+";
+        let doc = crate::dsl::parse(source).unwrap().doc;
+        let network = layout(&doc);
+        let blocker = doc
+            .nodes
+            .iter()
+            .find(|node| node.name == "blocker")
+            .unwrap();
+        let blocker_rect = network.node_rects[&blocker.id];
+        for edge in &doc.edges {
+            let route = network.edge_routes.get(&edge.id).unwrap();
+            for pair in route.points.windows(2) {
+                assert!(
+                    (pair[0][0] - pair[1][0]).abs() < 0.5 || (pair[0][1] - pair[1][1]).abs() < 0.5,
+                    "fan-out should stay orthogonal: {:?}",
+                    route.points
+                );
+                assert!(
+                    !segment_hits_rect(pair[0], pair[1], &blocker_rect),
+                    "fan-out branch start enters an unrelated node: {:?}",
+                    route.points
+                );
+            }
         }
     }
 
