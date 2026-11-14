@@ -279,7 +279,7 @@ frp-visualizer render examples/structural.frp structural-out --output network
 ```
 
 - `layout auto` / `layout manual`、ノードごとの `at x,y` に対応。auto layout は Sink を最右列に置き、入力側の重心に合わせて配置するため、大きな図でも `out` への配線が戻りにくい
-- `stream` / `cell` / `map` / `filter` / `merge` / `orElse` / `snapshot` / `hold` / `lift` / `never` / `sink`
+- `stream` / `cell` / `map` / `filter` / `gate` / `merge` / `orElse` / `snapshot` / `hold` / `lift` / `never` / `sink`
 - `component <name> { ... }` で Component を定義し、`component <instance> = <definition>` で配置
 - `import "path/to/component.frp"` で別ファイルの Component 定義を読み込み、現在のファイルから参照可能にする
 - `import` はファイル先頭（コメント・空行を除く）に置く。パスはそのファイルからの相対パス
@@ -298,6 +298,10 @@ frp-visualizer render examples/structural.frp structural-out --output network
 `map <name> = <op>` はStreamとCellの両方を扱います。DSLでは接続元から型を判定し、Streamの変換は黄色の五角形と実線、Cellの変換は青い五角形と破線で表示します。どちらも図の演算名は `map` です。mapの連鎖やComponent内部も、配線の記述順に依存せず型を判定します。
 
 Cell入力のmapは初期値にも演算を適用し、更新時には同じTransactionの上流Cellの更新を反映します。`snapshot` がそのCellを同時に読む場合は更新前の値を参照します。例は [`examples/map-cell.frp`](examples/map-cell.frp) を参照してください。JSONのノード種別は共通の `map` で、Cell入力の場合だけ `"cell":true` を指定します。省略時は従来どおりStream入力です。入出力ポートはともに `0`（DSLでは `.in` / `.out`）です。任意のC++関数は `display "処理名"` による構造表示で扱い、その値は実行しません。Rust APIで `NodeKind::Map` を直接構築する場合は `cell: false`（Stream）または `cell: true`（Cell）を指定します。
+
+`gate <name>` は `.event` のStreamを、`.gate`（別名 `.cell`）のBool型Cellが `true` のときだけ、その値のまま通します。判定にはTransaction開始時のCell値を使うため、同時刻のCell更新は次のTransactionから反映されます。Cellの更新だけではイベントは発生しません。図では黄色のひし形を使い、条件Cellは下から接続します。実行モードではBool以外の条件をエラーにし、構造モードで条件が表示専用処理に依存するときはタイミングを保証できない旨を警告します。
+
+例は [`examples/gate.frp`](examples/gate.frp) を参照してください。JSONのノード種別は `{"type":"gate"}`、入力ポートは `0` がイベント、`1` が条件Cellです。
 
 ![Structural mode](docs/examples/structural.svg)
 

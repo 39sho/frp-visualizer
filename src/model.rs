@@ -397,6 +397,7 @@ pub enum NodeKind {
         #[serde(default)]
         op: FilterOp,
     },
+    Gate,
     Merge,
     OrElse,
     Snapshot {
@@ -432,6 +433,7 @@ impl NodeKind {
             Self::InputCell { .. } => "cell",
             Self::Map { .. } => "map",
             Self::Filter { .. } => "filter",
+            Self::Gate => "gate",
             Self::Merge => "merge",
             Self::OrElse => "orElse",
             Self::Snapshot { .. } => "snapshot",
@@ -453,6 +455,7 @@ impl NodeKind {
             Self::InputEvent { .. }
                 | Self::Map { cell: false, .. }
                 | Self::Filter { .. }
+                | Self::Gate
                 | Self::Merge
                 | Self::OrElse
                 | Self::Snapshot { .. }
@@ -498,6 +501,7 @@ impl NodeKind {
             }
             Self::Merge | Self::OrElse => vec![PortType::Stream, PortType::Stream],
             Self::Map { cell: true, .. } => vec![PortType::Cell],
+            Self::Gate => vec![PortType::Stream, PortType::Cell],
             Self::Snapshot { .. } => vec![PortType::Stream, PortType::Cell],
             Self::Lift { .. } => vec![PortType::Cell, PortType::Cell],
             Self::Sink => vec![PortType::Any],
@@ -510,6 +514,8 @@ impl NodeKind {
         match (self, index) {
             (Self::Snapshot { .. }, 0) => "event",
             (Self::Snapshot { .. }, 1) => "cell",
+            (Self::Gate, 0) => "event",
+            (Self::Gate, 1) => "gate",
             (Self::Merge | Self::OrElse, 0) => "left",
             (Self::Merge | Self::OrElse, 1) => "right",
             (Self::Lift { .. }, 0) => "a",
@@ -538,6 +544,7 @@ impl NodeKind {
             Self::InputCell { initial, .. } => format!("= {}", initial.short(14)),
             Self::Map { op, .. } => op.label(),
             Self::Filter { op } => op.label(),
+            Self::Gate => "true".into(),
             Self::Merge | Self::OrElse => String::new(),
             Self::Snapshot { op } | Self::Lift { op } => op.symbol().to_string(),
             Self::Hold { initial } => initial.short(14),

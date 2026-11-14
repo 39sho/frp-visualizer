@@ -438,6 +438,26 @@ pub fn validate_document(doc: &Document) -> ValidationReport {
         }
     }
 
+    if !structural {
+        for node in &flattened.doc.nodes {
+            if !matches!(node.kind, NodeKind::Gate) {
+                continue;
+            }
+            if let Some(edge) = flattened.doc.incoming_edge(node.id, 1) {
+                if simulation
+                    .cell(edge.from)
+                    .iter()
+                    .any(|step| !matches!(step.value, Value::Bool(_)))
+                {
+                    errors.push(format!(
+                        "Gate '{}' requires a Bool condition cell",
+                        node.name
+                    ));
+                }
+            }
+        }
+    }
+
     for warning in simulation.warnings {
         if warning.contains("Display-only") {
             if !structural {
@@ -491,6 +511,12 @@ fn filter_timing_reliability(doc: &Document) -> (bool, Vec<String>) {
                         target.name
                     ));
                 }
+            }
+            if matches!(target.kind, NodeKind::Gate) && edge.to_port == 1 {
+                warnings.push(format!(
+                    "Timing event flow may depend on display-only values through gate '{}'",
+                    target.name
+                ));
             }
             stack.push(target.id);
         }
@@ -638,6 +664,12 @@ fn simulate_flat(doc: &Document) -> Simulation {
                 NodeKind::Filter { op } => {
                     stream_input(doc, id, 0, &event_values).filter(|v| op.test(v))
                 }
+                NodeKind::Gate => stream_input(doc, id, 0, &event_values).filter(|_| {
+                    matches!(
+                        cell_input_value(doc, id, 1, &cell_values),
+                        Value::Bool(true)
+                    )
+                }),
                 NodeKind::Merge => {
                     let left = stream_input(doc, id, 0, &event_values);
                     let right = stream_input(doc, id, 1, &event_values);

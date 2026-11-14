@@ -438,6 +438,12 @@ impl Parser {
                 };
                 NodeKind::Filter { op }
             }
+            "gate" => {
+                if !tail.is_empty() {
+                    return Err("gate does not take a value".into());
+                }
+                NodeKind::Gate
+            }
             "snapshot" => {
                 let op = tail
                     .strip_prefix('=')
@@ -819,6 +825,11 @@ fn resolve_port(doc: &Document, spec: &str, target: bool) -> Result<(NodeId, usi
                         _ => {
                             return Err(format!("unknown {} port '{port}'", node.kind.primitive()))
                         }
+                    },
+                    NodeKind::Gate => match port {
+                        "event" => 0,
+                        "gate" | "cell" => 1,
+                        _ => return Err(format!("unknown gate port '{port}'")),
                     },
                     NodeKind::Snapshot { .. } => match port {
                         "event" => 0,
