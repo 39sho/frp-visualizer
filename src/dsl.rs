@@ -39,6 +39,7 @@ fn parse_text(
     let mut parser = Parser::new(input, definitions, imported_only);
     let mut doc = Document::blank();
     parser.parse_top(&mut doc)?;
+    parser.infer_map_types(&mut doc)?;
     doc.components = parser.definitions;
     if parser.auto_layout {
         auto_layout_tree(&mut doc);
@@ -242,6 +243,7 @@ struct Parser {
     definitions: Vec<ComponentDef>,
     auto_layout: bool,
     imported_only: bool,
+    edge_lines: HashMap<u64, usize>,
 }
 
 impl Parser {
@@ -258,6 +260,7 @@ impl Parser {
             definitions,
             auto_layout: false,
             imported_only,
+            edge_lines: HashMap::new(),
         }
     }
 
@@ -284,6 +287,13 @@ impl Parser {
         Ok(())
     }
 
+    fn infer_map_types(&self, doc: &mut Document) -> Result<(), String> {
+        doc.infer_map_types().map_err(|(edge_id, error)| {
+            let line_number = self.edge_lines[&edge_id];
+            format!("line {line_number}: {error}")
+        })
+    }
+
     fn parse_statement(
         &mut self,
         doc: &mut Document,
@@ -297,7 +307,7 @@ impl Parser {
     fn parse_statement_inner(
         &mut self,
         doc: &mut Document,
-        _line_number: usize,
+        line_number: usize,
         line: &str,
     ) -> Result<(), String> {
         if line.starts_with("import ") {
@@ -345,7 +355,7 @@ impl Parser {
             return self.parse_component_instance(doc, line);
         }
         if line.contains("->") {
-            return self.parse_edge(doc, line);
+            return self.parse_edge(doc, line_number, line);
         }
         self.parse_node(doc, line)
     }
@@ -408,7 +418,7 @@ impl Parser {
                 } else {
                     parse_unary_op(op)?
                 };
-                NodeKind::Map { op }
+                NodeKind::Map { op, cell: false }
             }
             "filter" => {
                 let op = tail
@@ -428,14 +438,44 @@ impl Parser {
                 };
                 NodeKind::Filter { op }
             }
-            "snapshot" => {
-                let op = tail
-                    .strip_prefix('=')
-                    .ok_or("expected 'snapshot <name> = <op>'")?
-                    .trim();
-                NodeKind::Snapshot {
-                    op: parse_combine_op(op)?,
+            "gate" => {
+                if !tail.is_empty() {
+                    return Err("gate does not take a value".into());
                 }
+                NodeKind::Gate
+            }
+            "snapshot" => {
+                let (cells, op) = if let Some(rest) = tail.strip_prefix("cells ") {
+                    let (count, op) = rest
+                        .split_once('=')
+                        .ok_or("expected 'snapshot <name> cells <count> = <op>'")?;
+                    let cells = count
+                        .trim()
+                        .parse::<u8>()
+                        .ok()
+                        .filter(|count| *count > 0)
+                        .ok_or("snapshot cell count must be between 1 and 255")?;
+                    (cells, op.trim())
+                } else {
+                    (
+                        1,
+                        tail.strip_prefix('=')
+                            .ok_or("expected 'snapshot <name> = <op>'")?
+                            .trim(),
+                    )
+                };
+                let op = if let Some(display) = op.strip_prefix("display ") {
+                    let (text, rest) = take_quoted(display)?;
+                    if !rest.trim().is_empty() {
+                        return Err("unexpected text after display label".into());
+                    }
+                    display_label = Some(text);
+                    display_only = true;
+                    CombineOp::KeepLeft
+                } else {
+                    parse_combine_op(op)?
+                };
+                NodeKind::Snapshot { op, cells }
             }
             "lift" => {
                 let op = tail
@@ -527,7 +567,12 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_edge(&mut self, doc: &mut Document, line: &str) -> Result<(), String> {
+    fn parse_edge(
+        &mut self,
+        doc: &mut Document,
+        line_number: usize,
+        line: &str,
+    ) -> Result<(), String> {
         let (edge_text, label) = match line.rsplit_once(" : ") {
             Some((edge, label)) => (edge.trim(), label.trim()),
             None => (line, ""),
@@ -548,8 +593,9 @@ impl Parser {
         let (from, from_port) = resolve_port(doc, from.trim(), false)?;
         let (to, to_port) = resolve_port(doc, to.trim(), true)?;
         let edge_id = doc
-            .add_edge_from_port(from, from_port, to, to_port)
+            .add_inferred_edge(from, from_port, to, to_port)
             .map_err(|error| error.to_string())?;
+        self.edge_lines.insert(edge_id, line_number);
         if !label.is_empty() || label_width.is_some() {
             if let Some(edge) = doc.edges.iter_mut().find(|edge| edge.id == edge_id) {
                 edge.label = label.replace("\\n", "\n");
@@ -683,9 +729,12 @@ impl Parser {
                 node.name = port.name.clone();
             }
         }
+        let outer_edge_lines = std::mem::take(&mut self.edge_lines);
         for (line_number, line) in statements {
             self.parse_statement(&mut internal, line_number, &line)?;
         }
+        self.infer_map_types(&mut internal)?;
+        self.edge_lines = outer_edge_lines;
 
         self.definitions.push(ComponentDef {
             name: name.to_string(),
@@ -801,10 +850,19 @@ fn resolve_port(doc: &Document, spec: &str, target: bool) -> Result<(NodeId, usi
                             return Err(format!("unknown {} port '{port}'", node.kind.primitive()))
                         }
                     },
+                    NodeKind::Gate => match port {
+                        "event" => 0,
+                        "gate" | "cell" => 1,
+                        _ => return Err(format!("unknown gate port '{port}'")),
+                    },
                     NodeKind::Snapshot { .. } => match port {
                         "event" => 0,
                         "cell" => 1,
-                        _ => return Err(format!("unknown snapshot port '{port}'")),
+                        _ => port
+                            .strip_prefix('c')
+                            .and_then(|number| number.parse::<usize>().ok())
+                            .filter(|index| *index > 0)
+                            .ok_or_else(|| format!("unknown snapshot port '{port}'"))?,
                     },
                     NodeKind::Lift { .. } => match port {
                         "a" => 0,

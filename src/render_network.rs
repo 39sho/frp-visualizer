@@ -148,6 +148,10 @@ fn draw_node(scene: &mut Scene, doc: &Document, id: NodeId, rect: Rect) {
                 TextAnchor::Center,
             );
         }
+        NodeKind::Map { cell, .. } => {
+            draw_chevron(scene, rect, if *cell { BLUE } else { YELLOW }, shape_stroke);
+            draw_op_text(scene, node, rect, false);
+        }
         NodeKind::Lift { .. } => {
             draw_chevron(scene, rect, BLUE, shape_stroke);
             draw_op_text(scene, node, rect, true);
@@ -176,11 +180,11 @@ fn draw_node(scene: &mut Scene, doc: &Document, id: NodeId, rect: Rect) {
                 TextAnchor::Start,
             );
         }
-        NodeKind::Filter { .. } => {
+        NodeKind::Filter { .. } | NodeKind::Gate => {
             draw_diamond(scene, rect, YELLOW, shape_stroke);
             draw_filter_text(scene, node, rect);
         }
-        NodeKind::Map { .. } | NodeKind::Snapshot { .. } | NodeKind::Never => {
+        NodeKind::Snapshot { .. } | NodeKind::Never => {
             draw_chevron(scene, rect, YELLOW, shape_stroke);
             draw_op_text(scene, node, rect, false);
         }
@@ -214,8 +218,13 @@ fn draw_node(scene: &mut Scene, doc: &Document, id: NodeId, rect: Rect) {
             continue;
         }
         let (pos, anchor) = match (&node.kind, port) {
-            (NodeKind::Snapshot { .. }, 0) => ([center[0] - 8.0, center[1] - 9.0], TextAnchor::End),
-            (NodeKind::Snapshot { .. }, 1) => {
+            (NodeKind::Snapshot { .. } | NodeKind::Gate, 0) => {
+                ([center[0] - 8.0, center[1] - 9.0], TextAnchor::End)
+            }
+            (NodeKind::Snapshot { cells, .. }, port) if *cells > 1 && port > 0 => {
+                ([center[0], center[1] - 12.0], TextAnchor::Center)
+            }
+            (NodeKind::Snapshot { .. } | NodeKind::Gate, port) if port > 0 => {
                 ([center[0] + 9.0, center[1] + 12.0], TextAnchor::Start)
             }
             (NodeKind::Hold { .. }, 0) => ([center[0] + 9.0, center[1] + 13.0], TextAnchor::Start),

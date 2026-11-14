@@ -1,0 +1,22 @@
+diagram Cell変換・条件分岐・複数Cellの参照
+time_end 4
+layout auto
+
+stream input events 1:10, 2:20, 3:30, 4:40
+cell blocked = false changes 1:true, 3:false
+map enabled = not
+cell count = 2 changes 1:3, 2:4
+map doubled = mul 2
+cell offset = 5
+gate allowed
+snapshot total cells 2 = add
+sink out
+
+blocked -> enabled
+count -> doubled
+input -> allowed.event
+enabled -> allowed.gate
+allowed -> total.event
+doubled -> total.c1
+offset -> total.c2
+total -> out

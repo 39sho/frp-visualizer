@@ -430,11 +430,40 @@ pub fn validate_document(doc: &Document) -> ValidationReport {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
+    for node in &flattened.doc.nodes {
+        if matches!(node.kind, NodeKind::Snapshot { cells: 0, .. }) {
+            errors.push(format!(
+                "Snapshot '{}' requires at least one cell input",
+                node.name
+            ));
+        }
+    }
+
     for warning in flattened.warnings {
         if structural {
             warnings.push(warning);
         } else {
             errors.push(warning);
+        }
+    }
+
+    if !structural {
+        for node in &flattened.doc.nodes {
+            if !matches!(node.kind, NodeKind::Gate) {
+                continue;
+            }
+            if let Some(edge) = flattened.doc.incoming_edge(node.id, 1) {
+                if simulation
+                    .cell(edge.from)
+                    .iter()
+                    .any(|step| !matches!(step.value, Value::Bool(_)))
+                {
+                    errors.push(format!(
+                        "Gate '{}' requires a Bool condition cell",
+                        node.name
+                    ));
+                }
+            }
         }
     }
 
@@ -491,6 +520,12 @@ fn filter_timing_reliability(doc: &Document) -> (bool, Vec<String>) {
                         target.name
                     ));
                 }
+            }
+            if matches!(target.kind, NodeKind::Gate) && edge.to_port == 1 {
+                warnings.push(format!(
+                    "Timing event flow may depend on display-only values through gate '{}'",
+                    target.name
+                ));
             }
             stack.push(target.id);
         }
@@ -602,6 +637,9 @@ fn simulate_flat(doc: &Document) -> Simulation {
         let value = match &node.kind {
             NodeKind::InputCell { initial, .. } => initial.clone(),
             NodeKind::Hold { initial } => initial.clone(),
+            NodeKind::Map { op, cell: true } => {
+                op.apply(&cell_input_value(doc, id, 0, &cell_values))
+            }
             NodeKind::Lift { op } => {
                 let (a, b) = cell_inputs(doc, id, &cell_values);
                 op.apply(&a, &b)
@@ -629,12 +667,18 @@ fn simulate_flat(doc: &Document) -> Simulation {
                 NodeKind::InputEvent { .. } => {
                     input_events.get(&id).and_then(|m| m.get(&key)).cloned()
                 }
-                NodeKind::Map { op } => {
+                NodeKind::Map { op, cell: false } => {
                     stream_input(doc, id, 0, &event_values).map(|v| op.apply(&v))
                 }
                 NodeKind::Filter { op } => {
                     stream_input(doc, id, 0, &event_values).filter(|v| op.test(v))
                 }
+                NodeKind::Gate => stream_input(doc, id, 0, &event_values).filter(|_| {
+                    matches!(
+                        cell_input_value(doc, id, 1, &cell_values),
+                        Value::Bool(true)
+                    )
+                }),
                 NodeKind::Merge => {
                     let left = stream_input(doc, id, 0, &event_values);
                     let right = stream_input(doc, id, 1, &event_values);
@@ -660,11 +704,13 @@ fn simulate_flat(doc: &Document) -> Simulation {
                     let right = stream_input(doc, id, 1, &event_values);
                     left.or(right)
                 }
-                NodeKind::Snapshot { op } => {
+                NodeKind::Snapshot { op, cells } => {
                     let trigger = stream_input(doc, id, 0, &event_values);
                     trigger.map(|ev| {
-                        let cell = cell_input_value(doc, id, 1, &cell_values);
-                        op.apply(&ev, &cell)
+                        (1..=usize::from(*cells)).fold(ev, |value, port| {
+                            let cell = cell_input_value(doc, id, port, &cell_values);
+                            op.apply(&value, &cell)
+                        })
                     })
                 }
                 NodeKind::Never => None,
@@ -698,6 +744,13 @@ fn simulate_flat(doc: &Document) -> Simulation {
                     .and_then(|m| m.get(&key))
                     .cloned(),
                 NodeKind::Hold { .. } => stream_input(doc, id, 0, &event_values),
+                NodeKind::Map { op, cell: true } => doc.incoming_edge(id, 0).map(|edge| {
+                    let value = updated
+                        .get(&edge.from)
+                        .or_else(|| cell_values.get(&edge.from))
+                        .unwrap_or(&Value::Unit);
+                    op.apply(value)
+                }),
                 NodeKind::Lift { op } => {
                     let (a, b) = cell_inputs_with_updates(doc, id, &cell_values, &updated);
                     Some(op.apply(&a, &b))
@@ -1033,7 +1086,13 @@ mod tests {
             },
             [0.0, 0.0],
         );
-        let snap = doc.add_node(NodeKind::Snapshot { op: CombineOp::Add }, [220.0, 0.0]);
+        let snap = doc.add_node(
+            NodeKind::Snapshot {
+                op: CombineOp::Add,
+                cells: 1,
+            },
+            [220.0, 0.0],
+        );
         let hold = doc.add_node(
             NodeKind::Hold {
                 initial: Value::Number(0.0),
@@ -1111,6 +1170,7 @@ mod tests {
         let snap = doc.add_node(
             NodeKind::Snapshot {
                 op: CombineOp::KeepRight,
+                cells: 1,
             },
             [220.0, 60.0],
         );
@@ -1133,6 +1193,7 @@ mod tests {
         let map = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Constant(0.0),
+                cell: false,
             },
             [200.0, 0.0],
         );
@@ -1163,6 +1224,7 @@ mod tests {
         let map = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Add(10.0),
+                cell: false,
             },
             [400.0, 60.0],
         );
@@ -1243,6 +1305,7 @@ mod tests {
         let doubled = internal.add_node(
             NodeKind::Map {
                 op: UnaryOp::Multiply(2.0),
+                cell: false,
             },
             [200.0, 0.0],
         );
@@ -1292,6 +1355,7 @@ mod tests {
         let observed = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [440.0, 0.0],
         );
@@ -1341,6 +1405,7 @@ mod tests {
         let copied = internal.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [200.0, 0.0],
         );
@@ -1397,12 +1462,14 @@ mod tests {
         let observed_a = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [440.0, 0.0],
         );
         let observed_b = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [440.0, 140.0],
         );
@@ -1428,6 +1495,7 @@ mod tests {
         doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [0.0, 0.0],
         );
@@ -1460,6 +1528,7 @@ mod tests {
         let display = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [200.0, 0.0],
         );

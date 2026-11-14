@@ -279,7 +279,7 @@ frp-visualizer render examples/structural.frp structural-out --output network
 ```
 
 - `layout auto` / `layout manual`、ノードごとの `at x,y` に対応。auto layout は Sink を最右列に置き、入力側の重心に合わせて配置するため、大きな図でも `out` への配線が戻りにくい
-- `stream` / `cell` / `map` / `filter` / `merge` / `orElse` / `snapshot` / `hold` / `lift` / `never` / `sink`
+- `stream` / `cell` / `map` / `filter` / `gate` / `merge` / `orElse` / `snapshot` / `hold` / `lift` / `never` / `sink`
 - `component <name> { ... }` で Component を定義し、`component <instance> = <definition>` で配置
 - `import "path/to/component.frp"` で別ファイルの Component 定義を読み込み、現在のファイルから参照可能にする
 - `import` はファイル先頭（コメント・空行を除く）に置く。パスはそのファイルからの相対パス
@@ -294,6 +294,22 @@ frp-visualizer render examples/structural.frp structural-out --output network
 `merge` は同時発火時に警告を出して左のイベントを採用します。executable mode の検証ではこの警告がエラーになるため、`check` / `render` は通りません。警告なしで左優先のマージにしたい場合は `orElse`（または `or_else`）を使います。どちらも入力ポートは `.left` / `.right` です。
 
 `mode structural` と `display` を使うと、実行意味論を持たない構造スケッチを描けます。値は timing に出ません。
+
+`map <name> = <op>` はStreamとCellの両方を扱います。DSLでは接続元から型を判定し、Streamの変換は黄色の五角形と実線、Cellの変換は青い五角形と破線で表示します。どちらも図の演算名は `map` です。mapの連鎖やComponent内部も、配線の記述順に依存せず型を判定します。
+
+Cell入力のmapは初期値にも演算を適用し、更新時には同じTransactionの上流Cellの更新を反映します。`snapshot` がそのCellを同時に読む場合は更新前の値を参照します。例は [`examples/map-cell.frp`](examples/map-cell.frp) を参照してください。JSONのノード種別は共通の `map` で、Cell入力の場合だけ `"cell":true` を指定します。省略時は従来どおりStream入力です。入出力ポートはともに `0`（DSLでは `.in` / `.out`）です。任意のC++関数は `display "処理名"` による構造表示で扱い、その値は実行しません。Rust APIで `NodeKind::Map` を直接構築する場合は `cell: false`（Stream）または `cell: true`（Cell）を指定します。
+
+`gate <name>` は `.event` のStreamを、`.gate`（別名 `.cell`）のBool型Cellが `true` のときだけ、その値のまま通します。判定にはTransaction開始時のCell値を使うため、同時刻のCell更新は次のTransactionから反映されます。Cellの更新だけではイベントは発生しません。図では黄色のひし形を使い、条件Cellは下から接続します。実行モードではBool以外の条件をエラーにし、構造モードで条件が表示専用処理に依存するときはタイミングを保証できない旨を警告します。
+
+例は [`examples/gate.frp`](examples/gate.frp) を参照してください。JSONのノード種別は `{"type":"gate"}`、入力ポートは `0` がイベント、`1` が条件Cellです。
+
+`snapshot <name> cells <N> = <op>` で、イベントと1〜255個のCellを結合できます。入力は `.event` と `.c1`〜`.cN` で、`.cell` は `.c1` の別名です。`cells <N>` を省略すると従来どおりCell入力は1個になります。すべてのCellについてTransaction開始時の値を参照し、Cell更新だけでは発火しません。
+
+演算はイベント値から始めて、`c1`、`c2`、…の順に左から適用します。例えば `sub` は `((event - c1) - c2)`、`keep_right` は最後のCell値、`pair` は入れ子の組を表す文字列になります。任意のC++関数名は `snapshot result cells 3 = display "関数名"` で構造図に表示できます。この表示専用ノードは実行モードではエラーになります。
+
+例は [`examples/snapshot-multi.frp`](examples/snapshot-multi.frp) を参照してください。複数のCellポートは図形の下辺に分散して配置されます。JSONは `{"type":"snapshot","cells":3,"op":{"op":"add"}}` の形式で、従来の `cells` のないJSONも読み込めます。Rust APIで `NodeKind::Snapshot` を直接構築する場合は、従来の1入力でも `cells: 1` を指定します。
+
+3種類を組み合わせた例は [`examples/frp-primitives.frp`](examples/frp-primitives.frp) にあります。
 
 ![Structural mode](docs/examples/structural.svg)
 

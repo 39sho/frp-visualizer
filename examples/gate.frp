@@ -1,0 +1,12 @@
+diagram 条件Cellによるイベントの通過
+time_end 5
+layout auto
+
+stream input events 1:10, 2:20, 3:30, 4:40, 5:50
+cell enabled = false changes 1:true, 3:false, 4:true
+gate allowed
+sink out
+
+input -> allowed.event
+enabled -> allowed.gate
+allowed -> out

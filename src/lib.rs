@@ -347,6 +347,7 @@ mod tests {
         let map = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [200.0, 0.0],
         );
@@ -436,6 +437,7 @@ mod tests {
             let map = doc.add_node(
                 NodeKind::Map {
                     op: UnaryOp::Identity,
+                    cell: false,
                 },
                 [100.0 + index as f32 * 100.0, 0.0],
             );
@@ -572,6 +574,7 @@ mod tests {
         let id = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Add(1.0),
+                cell: false,
             },
             [0.0, 0.0],
         );
@@ -586,7 +589,13 @@ mod tests {
     #[test]
     fn hold_and_snapshot_use_special_ports() {
         let mut doc = Document::blank();
-        let snap = doc.add_node(NodeKind::Snapshot { op: CombineOp::Add }, [100.0, 100.0]);
+        let snap = doc.add_node(
+            NodeKind::Snapshot {
+                op: CombineOp::Add,
+                cells: 1,
+            },
+            [100.0, 100.0],
+        );
         let hold = doc.add_node(
             NodeKind::Hold {
                 initial: Value::Number(0.0),
@@ -623,6 +632,7 @@ mod tests {
         let map = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [200.0, 0.0],
         );

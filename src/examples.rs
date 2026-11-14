@@ -67,7 +67,10 @@ fn accumulator() -> Document {
     );
     let total = add(
         &mut doc,
-        NodeKind::Snapshot { op: CombineOp::Add },
+        NodeKind::Snapshot {
+            op: CombineOp::Add,
+            cells: 1,
+        },
         "snapshot",
         "",
         [300.0, 120.0],
@@ -112,6 +115,7 @@ fn map_filter() -> Document {
         &mut doc,
         NodeKind::Map {
             op: UnaryOp::Add(1.0),
+            cell: false,
         },
         "map",
         "",
@@ -165,6 +169,7 @@ fn snapshot() -> Document {
         &mut doc,
         NodeKind::Snapshot {
             op: CombineOp::KeepRight,
+            cells: 1,
         },
         "snapshot",
         "",
@@ -174,6 +179,7 @@ fn snapshot() -> Document {
         &mut doc,
         NodeKind::Map {
             op: UnaryOp::Reverse,
+            cell: false,
         },
         "map",
         "",
@@ -332,6 +338,7 @@ fn calibration() -> Document {
         &mut doc,
         NodeKind::Map {
             op: UnaryOp::Constant(0.0),
+            cell: false,
         },
         "map",
         "",
@@ -353,7 +360,10 @@ fn calibration() -> Document {
     );
     let snap = add(
         &mut doc,
-        NodeKind::Snapshot { op: CombineOp::Add },
+        NodeKind::Snapshot {
+            op: CombineOp::Add,
+            cells: 1,
+        },
         "snapshot",
         "",
         [470.0, 150.0],
@@ -447,6 +457,7 @@ fn component() -> Document {
         &mut internal,
         NodeKind::Map {
             op: UnaryOp::Constant(0.0),
+            cell: false,
         },
         "clearZero",
         "",
@@ -454,7 +465,10 @@ fn component() -> Document {
     );
     let snapshot = add(
         &mut internal,
-        NodeKind::Snapshot { op: CombineOp::Add },
+        NodeKind::Snapshot {
+            op: CombineOp::Add,
+            cells: 1,
+        },
         "snapshot",
         "",
         [500.0, 80.0],
@@ -531,6 +545,7 @@ fn component() -> Document {
         &mut doc,
         NodeKind::Map {
             op: UnaryOp::Identity,
+            cell: false,
         },
         "observed",
         "",
@@ -569,6 +584,7 @@ fn annotation() -> Document {
         &mut doc,
         NodeKind::Map {
             op: UnaryOp::Add(1.0),
+            cell: false,
         },
         "increment",
         "",

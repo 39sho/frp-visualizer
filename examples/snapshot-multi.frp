@@ -1,0 +1,16 @@
+diagram 複数Cellの更新前の値を参照
+time_end 3
+layout auto
+
+stream input events 1:100, 2:100, 3:100
+cell first = 10 changes 1:20
+cell second = 5 changes 1:7
+cell third = 2 changes 2:3
+snapshot total cells 3 = sub
+sink out
+
+input -> total.event
+first -> total.c1
+second -> total.c2
+third -> total.c3
+total -> out
