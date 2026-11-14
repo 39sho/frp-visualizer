@@ -1,0 +1,14 @@
+diagram Cell値の変換と旧値の参照
+time_end 3
+layout auto
+
+cell count = 2 changes 1:3, 2:4
+map doubled = mul 2
+stream tick events 1:(), 2:(), 3:()
+snapshot observed = keep_right
+sink out
+
+count -> doubled
+tick -> observed.event
+doubled -> observed.cell
+observed -> out

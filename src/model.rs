@@ -390,6 +390,8 @@ pub enum NodeKind {
     Map {
         #[serde(default)]
         op: UnaryOp,
+        #[serde(default, skip_serializing_if = "is_false")]
+        cell: bool,
     },
     Filter {
         #[serde(default)]
@@ -449,7 +451,7 @@ impl NodeKind {
         matches!(
             self,
             Self::InputEvent { .. }
-                | Self::Map { .. }
+                | Self::Map { cell: false, .. }
                 | Self::Filter { .. }
                 | Self::Merge
                 | Self::OrElse
@@ -461,7 +463,10 @@ impl NodeKind {
     pub fn is_cell(&self) -> bool {
         matches!(
             self,
-            Self::InputCell { .. } | Self::Hold { .. } | Self::Lift { .. }
+            Self::InputCell { .. }
+                | Self::Hold { .. }
+                | Self::Lift { .. }
+                | Self::Map { cell: true, .. }
         )
     }
 
@@ -488,10 +493,11 @@ impl NodeKind {
 
     pub fn input_types(&self) -> Vec<PortType> {
         match self {
-            Self::Map { .. } | Self::Filter { .. } | Self::Hold { .. } => {
+            Self::Map { cell: false, .. } | Self::Filter { .. } | Self::Hold { .. } => {
                 vec![PortType::Stream]
             }
             Self::Merge | Self::OrElse => vec![PortType::Stream, PortType::Stream],
+            Self::Map { cell: true, .. } => vec![PortType::Cell],
             Self::Snapshot { .. } => vec![PortType::Stream, PortType::Cell],
             Self::Lift { .. } => vec![PortType::Cell, PortType::Cell],
             Self::Sink => vec![PortType::Any],
@@ -530,7 +536,7 @@ impl NodeKind {
         match self {
             Self::InputEvent { .. } => String::new(),
             Self::InputCell { initial, .. } => format!("= {}", initial.short(14)),
-            Self::Map { op } => op.label(),
+            Self::Map { op, .. } => op.label(),
             Self::Filter { op } => op.label(),
             Self::Merge | Self::OrElse => String::new(),
             Self::Snapshot { op } | Self::Lift { op } => op.symbol().to_string(),
@@ -743,6 +749,17 @@ impl Document {
         to: NodeId,
         to_port: usize,
     ) -> Result<(), String> {
+        self.validate_edge_connection(from, from_port, to, to_port, false)
+    }
+
+    fn validate_edge_connection(
+        &self,
+        from: NodeId,
+        from_port: usize,
+        to: NodeId,
+        to_port: usize,
+        infer_maps: bool,
+    ) -> Result<(), String> {
         if from == to {
             return Err("A node cannot be connected to itself".into());
         }
@@ -757,7 +774,10 @@ impl Document {
         let target_type = *input_types
             .get(to_port)
             .ok_or("The target node has no such input port")?;
-        if !target_type.accepts(source_type) {
+        let deferred = infer_maps
+            && (matches!(source.kind, NodeKind::Map { .. })
+                || matches!(target.kind, NodeKind::Map { .. }));
+        if !deferred && !target_type.accepts(source_type) {
             return Err(format!(
                 "{} output cannot connect to {} input",
                 source_type.name(),
@@ -787,6 +807,21 @@ impl Document {
         to_port: usize,
     ) -> Result<u64, String> {
         self.validate_edge_from(from, from_port, to, to_port)?;
+        Ok(self.insert_edge(from, from_port, to, to_port))
+    }
+
+    pub(crate) fn add_inferred_edge(
+        &mut self,
+        from: NodeId,
+        from_port: usize,
+        to: NodeId,
+        to_port: usize,
+    ) -> Result<u64, String> {
+        self.validate_edge_connection(from, from_port, to, to_port, true)?;
+        Ok(self.insert_edge(from, from_port, to, to_port))
+    }
+
+    fn insert_edge(&mut self, from: NodeId, from_port: usize, to: NodeId, to_port: usize) -> u64 {
         let id = self.next_edge_id();
         self.edges.push(Edge {
             id,
@@ -797,7 +832,60 @@ impl Document {
             label: String::new(),
             label_width: None,
         });
-        Ok(id)
+        id
+    }
+
+    pub(crate) fn infer_map_types(&mut self) -> Result<(), (u64, String)> {
+        // 接続を読み終えてから伝播させることで、mapの連鎖を配線の記述順に依存させない。
+        for _ in 0..self.nodes.len() {
+            let changes: Vec<_> = self
+                .nodes
+                .iter()
+                .filter_map(|node| {
+                    let NodeKind::Map { cell, .. } = node.kind else {
+                        return None;
+                    };
+                    let edge = self.incoming_edge(node.id, 0)?;
+                    let source = self.node(edge.from)?;
+                    let inferred =
+                        source.kind.output_types().get(edge.from_port).copied()? == PortType::Cell;
+                    (cell != inferred).then_some((node.id, inferred))
+                })
+                .collect();
+            if changes.is_empty() {
+                break;
+            }
+            for (id, inferred) in changes {
+                if let Some(Node {
+                    kind: NodeKind::Map { cell, .. },
+                    ..
+                }) = self.node_mut(id)
+                {
+                    *cell = inferred;
+                }
+            }
+        }
+        for edge in &self.edges {
+            let source = self
+                .node(edge.from)
+                .ok_or_else(|| (edge.id, "Unknown source node".into()))?;
+            let target = self
+                .node(edge.to)
+                .ok_or_else(|| (edge.id, "Unknown target node".into()))?;
+            let source_type = source.kind.output_types()[edge.from_port];
+            let target_type = target.kind.input_types()[edge.to_port];
+            if !target_type.accepts(source_type) {
+                return Err((
+                    edge.id,
+                    format!(
+                        "{} output cannot connect to {} input",
+                        source_type.name(),
+                        target_type.name()
+                    ),
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub fn remove_edge(&mut self, id: u64) {

@@ -295,6 +295,10 @@ frp-visualizer render examples/structural.frp structural-out --output network
 
 `mode structural` と `display` を使うと、実行意味論を持たない構造スケッチを描けます。値は timing に出ません。
 
+`map <name> = <op>` はStreamとCellの両方を扱います。DSLでは接続元から型を判定し、Streamの変換は黄色の五角形と実線、Cellの変換は青い五角形と破線で表示します。どちらも図の演算名は `map` です。mapの連鎖やComponent内部も、配線の記述順に依存せず型を判定します。
+
+Cell入力のmapは初期値にも演算を適用し、更新時には同じTransactionの上流Cellの更新を反映します。`snapshot` がそのCellを同時に読む場合は更新前の値を参照します。例は [`examples/map-cell.frp`](examples/map-cell.frp) を参照してください。JSONのノード種別は共通の `map` で、Cell入力の場合だけ `"cell":true` を指定します。省略時は従来どおりStream入力です。入出力ポートはともに `0`（DSLでは `.in` / `.out`）です。任意のC++関数は `display "処理名"` による構造表示で扱い、その値は実行しません。Rust APIで `NodeKind::Map` を直接構築する場合は `cell: false`（Stream）または `cell: true`（Cell）を指定します。
+
 ![Structural mode](docs/examples/structural.svg)
 
 完全な例は [`examples/calibration.frp`](examples/calibration.frp)、[`examples/component.frp`](examples/component.frp)、[`examples/annotation.frp`](examples/annotation.frp)、[`examples/structural.frp`](examples/structural.frp)、[`examples/nested.frp`](examples/nested.frp)、[`examples/modular/main.frp`](examples/modular/main.frp) にあります。

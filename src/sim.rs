@@ -602,6 +602,9 @@ fn simulate_flat(doc: &Document) -> Simulation {
         let value = match &node.kind {
             NodeKind::InputCell { initial, .. } => initial.clone(),
             NodeKind::Hold { initial } => initial.clone(),
+            NodeKind::Map { op, cell: true } => {
+                op.apply(&cell_input_value(doc, id, 0, &cell_values))
+            }
             NodeKind::Lift { op } => {
                 let (a, b) = cell_inputs(doc, id, &cell_values);
                 op.apply(&a, &b)
@@ -629,7 +632,7 @@ fn simulate_flat(doc: &Document) -> Simulation {
                 NodeKind::InputEvent { .. } => {
                     input_events.get(&id).and_then(|m| m.get(&key)).cloned()
                 }
-                NodeKind::Map { op } => {
+                NodeKind::Map { op, cell: false } => {
                     stream_input(doc, id, 0, &event_values).map(|v| op.apply(&v))
                 }
                 NodeKind::Filter { op } => {
@@ -698,6 +701,13 @@ fn simulate_flat(doc: &Document) -> Simulation {
                     .and_then(|m| m.get(&key))
                     .cloned(),
                 NodeKind::Hold { .. } => stream_input(doc, id, 0, &event_values),
+                NodeKind::Map { op, cell: true } => doc.incoming_edge(id, 0).map(|edge| {
+                    let value = updated
+                        .get(&edge.from)
+                        .or_else(|| cell_values.get(&edge.from))
+                        .unwrap_or(&Value::Unit);
+                    op.apply(value)
+                }),
                 NodeKind::Lift { op } => {
                     let (a, b) = cell_inputs_with_updates(doc, id, &cell_values, &updated);
                     Some(op.apply(&a, &b))
@@ -1133,6 +1143,7 @@ mod tests {
         let map = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Constant(0.0),
+                cell: false,
             },
             [200.0, 0.0],
         );
@@ -1163,6 +1174,7 @@ mod tests {
         let map = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Add(10.0),
+                cell: false,
             },
             [400.0, 60.0],
         );
@@ -1243,6 +1255,7 @@ mod tests {
         let doubled = internal.add_node(
             NodeKind::Map {
                 op: UnaryOp::Multiply(2.0),
+                cell: false,
             },
             [200.0, 0.0],
         );
@@ -1292,6 +1305,7 @@ mod tests {
         let observed = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [440.0, 0.0],
         );
@@ -1341,6 +1355,7 @@ mod tests {
         let copied = internal.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [200.0, 0.0],
         );
@@ -1397,12 +1412,14 @@ mod tests {
         let observed_a = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [440.0, 0.0],
         );
         let observed_b = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [440.0, 140.0],
         );
@@ -1428,6 +1445,7 @@ mod tests {
         doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [0.0, 0.0],
         );
@@ -1460,6 +1478,7 @@ mod tests {
         let display = doc.add_node(
             NodeKind::Map {
                 op: UnaryOp::Identity,
+                cell: false,
             },
             [200.0, 0.0],
         );

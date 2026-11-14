@@ -112,6 +112,7 @@ fn map_filter() -> Document {
         &mut doc,
         NodeKind::Map {
             op: UnaryOp::Add(1.0),
+            cell: false,
         },
         "map",
         "",
@@ -174,6 +175,7 @@ fn snapshot() -> Document {
         &mut doc,
         NodeKind::Map {
             op: UnaryOp::Reverse,
+            cell: false,
         },
         "map",
         "",
@@ -332,6 +334,7 @@ fn calibration() -> Document {
         &mut doc,
         NodeKind::Map {
             op: UnaryOp::Constant(0.0),
+            cell: false,
         },
         "map",
         "",
@@ -447,6 +450,7 @@ fn component() -> Document {
         &mut internal,
         NodeKind::Map {
             op: UnaryOp::Constant(0.0),
+            cell: false,
         },
         "clearZero",
         "",
@@ -531,6 +535,7 @@ fn component() -> Document {
         &mut doc,
         NodeKind::Map {
             op: UnaryOp::Identity,
+            cell: false,
         },
         "observed",
         "",
@@ -569,6 +574,7 @@ fn annotation() -> Document {
         &mut doc,
         NodeKind::Map {
             op: UnaryOp::Add(1.0),
+            cell: false,
         },
         "increment",
         "",

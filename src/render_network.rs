@@ -148,6 +148,10 @@ fn draw_node(scene: &mut Scene, doc: &Document, id: NodeId, rect: Rect) {
                 TextAnchor::Center,
             );
         }
+        NodeKind::Map { cell, .. } => {
+            draw_chevron(scene, rect, if *cell { BLUE } else { YELLOW }, shape_stroke);
+            draw_op_text(scene, node, rect, false);
+        }
         NodeKind::Lift { .. } => {
             draw_chevron(scene, rect, BLUE, shape_stroke);
             draw_op_text(scene, node, rect, true);
@@ -180,7 +184,7 @@ fn draw_node(scene: &mut Scene, doc: &Document, id: NodeId, rect: Rect) {
             draw_diamond(scene, rect, YELLOW, shape_stroke);
             draw_filter_text(scene, node, rect);
         }
-        NodeKind::Map { .. } | NodeKind::Snapshot { .. } | NodeKind::Never => {
+        NodeKind::Snapshot { .. } | NodeKind::Never => {
             draw_chevron(scene, rect, YELLOW, shape_stroke);
             draw_op_text(scene, node, rect, false);
         }
