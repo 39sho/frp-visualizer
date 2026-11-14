@@ -67,7 +67,10 @@ fn accumulator() -> Document {
     );
     let total = add(
         &mut doc,
-        NodeKind::Snapshot { op: CombineOp::Add },
+        NodeKind::Snapshot {
+            op: CombineOp::Add,
+            cells: 1,
+        },
         "snapshot",
         "",
         [300.0, 120.0],
@@ -166,6 +169,7 @@ fn snapshot() -> Document {
         &mut doc,
         NodeKind::Snapshot {
             op: CombineOp::KeepRight,
+            cells: 1,
         },
         "snapshot",
         "",
@@ -356,7 +360,10 @@ fn calibration() -> Document {
     );
     let snap = add(
         &mut doc,
-        NodeKind::Snapshot { op: CombineOp::Add },
+        NodeKind::Snapshot {
+            op: CombineOp::Add,
+            cells: 1,
+        },
         "snapshot",
         "",
         [470.0, 150.0],
@@ -458,7 +465,10 @@ fn component() -> Document {
     );
     let snapshot = add(
         &mut internal,
-        NodeKind::Snapshot { op: CombineOp::Add },
+        NodeKind::Snapshot {
+            op: CombineOp::Add,
+            cells: 1,
+        },
         "snapshot",
         "",
         [500.0, 80.0],

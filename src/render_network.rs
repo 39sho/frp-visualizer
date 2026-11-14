@@ -221,7 +221,10 @@ fn draw_node(scene: &mut Scene, doc: &Document, id: NodeId, rect: Rect) {
             (NodeKind::Snapshot { .. } | NodeKind::Gate, 0) => {
                 ([center[0] - 8.0, center[1] - 9.0], TextAnchor::End)
             }
-            (NodeKind::Snapshot { .. } | NodeKind::Gate, 1) => {
+            (NodeKind::Snapshot { cells, .. }, port) if *cells > 1 && port > 0 => {
+                ([center[0], center[1] - 12.0], TextAnchor::Center)
+            }
+            (NodeKind::Snapshot { .. } | NodeKind::Gate, port) if port > 0 => {
                 ([center[0] + 9.0, center[1] + 12.0], TextAnchor::Start)
             }
             (NodeKind::Hold { .. }, 0) => ([center[0] + 9.0, center[1] + 13.0], TextAnchor::Start),

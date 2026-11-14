@@ -445,13 +445,37 @@ impl Parser {
                 NodeKind::Gate
             }
             "snapshot" => {
-                let op = tail
-                    .strip_prefix('=')
-                    .ok_or("expected 'snapshot <name> = <op>'")?
-                    .trim();
-                NodeKind::Snapshot {
-                    op: parse_combine_op(op)?,
-                }
+                let (cells, op) = if let Some(rest) = tail.strip_prefix("cells ") {
+                    let (count, op) = rest
+                        .split_once('=')
+                        .ok_or("expected 'snapshot <name> cells <count> = <op>'")?;
+                    let cells = count
+                        .trim()
+                        .parse::<u8>()
+                        .ok()
+                        .filter(|count| *count > 0)
+                        .ok_or("snapshot cell count must be between 1 and 255")?;
+                    (cells, op.trim())
+                } else {
+                    (
+                        1,
+                        tail.strip_prefix('=')
+                            .ok_or("expected 'snapshot <name> = <op>'")?
+                            .trim(),
+                    )
+                };
+                let op = if let Some(display) = op.strip_prefix("display ") {
+                    let (text, rest) = take_quoted(display)?;
+                    if !rest.trim().is_empty() {
+                        return Err("unexpected text after display label".into());
+                    }
+                    display_label = Some(text);
+                    display_only = true;
+                    CombineOp::KeepLeft
+                } else {
+                    parse_combine_op(op)?
+                };
+                NodeKind::Snapshot { op, cells }
             }
             "lift" => {
                 let op = tail
@@ -834,7 +858,11 @@ fn resolve_port(doc: &Document, spec: &str, target: bool) -> Result<(NodeId, usi
                     NodeKind::Snapshot { .. } => match port {
                         "event" => 0,
                         "cell" => 1,
-                        _ => return Err(format!("unknown snapshot port '{port}'")),
+                        _ => port
+                            .strip_prefix('c')
+                            .and_then(|number| number.parse::<usize>().ok())
+                            .filter(|index| *index > 0)
+                            .ok_or_else(|| format!("unknown snapshot port '{port}'"))?,
                     },
                     NodeKind::Lift { .. } => match port {
                         "a" => 0,

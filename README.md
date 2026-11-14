@@ -303,6 +303,14 @@ Cell入力のmapは初期値にも演算を適用し、更新時には同じTran
 
 例は [`examples/gate.frp`](examples/gate.frp) を参照してください。JSONのノード種別は `{"type":"gate"}`、入力ポートは `0` がイベント、`1` が条件Cellです。
 
+`snapshot <name> cells <N> = <op>` で、イベントと1〜255個のCellを結合できます。入力は `.event` と `.c1`〜`.cN` で、`.cell` は `.c1` の別名です。`cells <N>` を省略すると従来どおりCell入力は1個になります。すべてのCellについてTransaction開始時の値を参照し、Cell更新だけでは発火しません。
+
+演算はイベント値から始めて、`c1`、`c2`、…の順に左から適用します。例えば `sub` は `((event - c1) - c2)`、`keep_right` は最後のCell値、`pair` は入れ子の組を表す文字列になります。任意のC++関数名は `snapshot result cells 3 = display "関数名"` で構造図に表示できます。この表示専用ノードは実行モードではエラーになります。
+
+例は [`examples/snapshot-multi.frp`](examples/snapshot-multi.frp) を参照してください。複数のCellポートは図形の下辺に分散して配置されます。JSONは `{"type":"snapshot","cells":3,"op":{"op":"add"}}` の形式で、従来の `cells` のないJSONも読み込めます。Rust APIで `NodeKind::Snapshot` を直接構築する場合は、従来の1入力でも `cells: 1` を指定します。
+
+3種類を組み合わせた例は [`examples/frp-primitives.frp`](examples/frp-primitives.frp) にあります。
+
 ![Structural mode](docs/examples/structural.svg)
 
 完全な例は [`examples/calibration.frp`](examples/calibration.frp)、[`examples/component.frp`](examples/component.frp)、[`examples/annotation.frp`](examples/annotation.frp)、[`examples/structural.frp`](examples/structural.frp)、[`examples/nested.frp`](examples/nested.frp)、[`examples/modular/main.frp`](examples/modular/main.frp) にあります。

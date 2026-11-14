@@ -430,6 +430,15 @@ pub fn validate_document(doc: &Document) -> ValidationReport {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
+    for node in &flattened.doc.nodes {
+        if matches!(node.kind, NodeKind::Snapshot { cells: 0, .. }) {
+            errors.push(format!(
+                "Snapshot '{}' requires at least one cell input",
+                node.name
+            ));
+        }
+    }
+
     for warning in flattened.warnings {
         if structural {
             warnings.push(warning);
@@ -695,11 +704,13 @@ fn simulate_flat(doc: &Document) -> Simulation {
                     let right = stream_input(doc, id, 1, &event_values);
                     left.or(right)
                 }
-                NodeKind::Snapshot { op } => {
+                NodeKind::Snapshot { op, cells } => {
                     let trigger = stream_input(doc, id, 0, &event_values);
                     trigger.map(|ev| {
-                        let cell = cell_input_value(doc, id, 1, &cell_values);
-                        op.apply(&ev, &cell)
+                        (1..=usize::from(*cells)).fold(ev, |value, port| {
+                            let cell = cell_input_value(doc, id, port, &cell_values);
+                            op.apply(&value, &cell)
+                        })
                     })
                 }
                 NodeKind::Never => None,
@@ -1075,7 +1086,13 @@ mod tests {
             },
             [0.0, 0.0],
         );
-        let snap = doc.add_node(NodeKind::Snapshot { op: CombineOp::Add }, [220.0, 0.0]);
+        let snap = doc.add_node(
+            NodeKind::Snapshot {
+                op: CombineOp::Add,
+                cells: 1,
+            },
+            [220.0, 0.0],
+        );
         let hold = doc.add_node(
             NodeKind::Hold {
                 initial: Value::Number(0.0),
@@ -1153,6 +1170,7 @@ mod tests {
         let snap = doc.add_node(
             NodeKind::Snapshot {
                 op: CombineOp::KeepRight,
+                cells: 1,
             },
             [220.0, 60.0],
         );

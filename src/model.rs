@@ -374,6 +374,26 @@ impl PortType {
     }
 }
 
+fn default_snapshot_cells() -> u8 {
+    1
+}
+
+fn is_single_snapshot_cell(cells: &u8) -> bool {
+    *cells == 1
+}
+
+fn deserialize_snapshot_cells<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u8, D::Error> {
+    let cells = u8::deserialize(deserializer)?;
+    if cells == 0 {
+        return Err(serde::de::Error::custom(
+            "snapshot cell count must be between 1 and 255",
+        ));
+    }
+    Ok(cells)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeKind {
@@ -403,6 +423,12 @@ pub enum NodeKind {
     Snapshot {
         #[serde(default)]
         op: CombineOp,
+        #[serde(
+            default = "default_snapshot_cells",
+            skip_serializing_if = "is_single_snapshot_cell",
+            deserialize_with = "deserialize_snapshot_cells"
+        )]
+        cells: u8,
     },
     Hold {
         #[serde(default)]
@@ -502,7 +528,11 @@ impl NodeKind {
             Self::Merge | Self::OrElse => vec![PortType::Stream, PortType::Stream],
             Self::Map { cell: true, .. } => vec![PortType::Cell],
             Self::Gate => vec![PortType::Stream, PortType::Cell],
-            Self::Snapshot { .. } => vec![PortType::Stream, PortType::Cell],
+            Self::Snapshot { cells, .. } => {
+                let mut ports = vec![PortType::Stream];
+                ports.extend(vec![PortType::Cell; usize::from(*cells)]);
+                ports
+            }
             Self::Lift { .. } => vec![PortType::Cell, PortType::Cell],
             Self::Sink => vec![PortType::Any],
             Self::Component { inputs, .. } => inputs.iter().map(|port| port.ty).collect(),
@@ -510,7 +540,12 @@ impl NodeKind {
         }
     }
 
-    pub fn port_label(&self, index: usize) -> &str {
+    pub fn port_label(&self, index: usize) -> String {
+        if let Self::Snapshot { cells, .. } = self {
+            if *cells > 1 && index > 0 && index <= usize::from(*cells) {
+                return format!("c{index}");
+            }
+        }
         match (self, index) {
             (Self::Snapshot { .. }, 0) => "event",
             (Self::Snapshot { .. }, 1) => "cell",
@@ -526,6 +561,7 @@ impl NodeKind {
                 .unwrap_or(""),
             _ => "",
         }
+        .to_string()
     }
 
     pub fn output_port_label(&self, index: usize) -> &str {
@@ -546,7 +582,7 @@ impl NodeKind {
             Self::Filter { op } => op.label(),
             Self::Gate => "true".into(),
             Self::Merge | Self::OrElse => String::new(),
-            Self::Snapshot { op } | Self::Lift { op } => op.symbol().to_string(),
+            Self::Snapshot { op, .. } | Self::Lift { op } => op.symbol().to_string(),
             Self::Hold { initial } => initial.short(14),
             Self::Never => String::new(),
             Self::Sink => String::new(),
@@ -592,6 +628,14 @@ impl Node {
                 [width, 24.0]
             }
             NodeKind::Merge | NodeKind::OrElse => [150.0, 88.0],
+            NodeKind::Snapshot { cells, .. } if *cells > 1 => {
+                let label_width = if self.label.is_empty() {
+                    150.0
+                } else {
+                    (text_width(&self.label, 14.0) + 50.0).clamp(170.0, 380.0)
+                };
+                [label_width.max(f32::from(*cells) * 44.0 + 48.0), 74.0]
+            }
             NodeKind::Component {
                 inputs,
                 outputs,

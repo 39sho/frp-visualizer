@@ -322,7 +322,7 @@ fn fanout_lanes(desired: &[f32]) -> Vec<f32> {
 }
 
 fn input_port_dir(node: &crate::model::Node, port: usize) -> [f32; 2] {
-    if matches!(node.kind, NodeKind::Snapshot { .. } | NodeKind::Gate) && port == 1 {
+    if matches!(node.kind, NodeKind::Snapshot { .. } | NodeKind::Gate) && port > 0 {
         [0.0, 1.0]
     } else if matches!(node.kind, NodeKind::Hold { .. }) && port == 0 {
         [0.0, -1.0]
@@ -1491,8 +1491,19 @@ fn compute_bounds(doc: &Document, layout: &NetworkLayout) -> Rect {
 }
 
 pub fn input_port_pos(node: &crate::model::Node, rect: Rect, port: usize) -> [f32; 2] {
-    if matches!(node.kind, NodeKind::Snapshot { .. } | NodeKind::Gate) && port == 1 {
-        return [rect.x + rect.w / 2.0, rect.bottom()];
+    if matches!(node.kind, NodeKind::Gate) && port == 1 {
+        return [rect.center()[0], rect.bottom()];
+    }
+    if let NodeKind::Snapshot { cells, .. } = node.kind {
+        if port > 0 {
+            let x = if cells == 1 {
+                rect.center()[0]
+            } else {
+                let tip = (rect.h * 0.30).min(24.0);
+                rect.x + (rect.w - tip) * port as f32 / (f32::from(cells) + 1.0)
+            };
+            return [x, rect.bottom()];
+        }
     }
     if matches!(node.kind, crate::model::NodeKind::Hold { .. }) && port == 0 {
         return [rect.x + rect.w / 2.0, rect.y];
@@ -1563,7 +1574,7 @@ pub fn auto_layout(doc: &mut Document) {
             .node(edge.to)
             .map(|node| {
                 matches!(node.kind, NodeKind::Snapshot { .. } | NodeKind::Gate)
-                    && edge.to_port == 1
+                    && edge.to_port > 0
                     && doc
                         .node(edge.from)
                         .map(|source| matches!(source.kind, crate::model::NodeKind::Hold { .. }))
